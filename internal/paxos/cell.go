@@ -90,29 +90,29 @@ func (c *Cell) Propose(ctx context.Context, key string, value []byte) error {
 	}
 }
 
-func (c *Cell) ProposeMembership(ctx context.Context, agentID, address string) error {
+func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state.PeerInfo) error {
 	key := "/_internal/peers"
 	for {
 		val, _, version, _, err := c.store.GetKVEntry(key)
 		if err != nil {
-			return fmt.Errorf("failed to get KV entry for peers: %w", key, err)
+			return fmt.Errorf("failed to get KV entry for peers: %w", err)
 		}
-		var peers map[string]string
+		var peers map[string]state.PeerInfo
 		if val != nil {
 			if err := json.Unmarshal(val, &peers); err != nil {
 				glog.Errorf("Cell(%s): Failed to unmarshal peers map: %v", c.agentID, err)
-				peers = make(map[string]string)
+				peers = make(map[string]state.PeerInfo)
 			}
 		} else {
-			peers = make(map[string]string)
+			peers = make(map[string]state.PeerInfo)
 		}
 
 		// Check if already correct
-		if peers[agentID] == address {
+		if existing, ok := peers[agentID]; ok && existing == info {
 			return nil
 		}
 
-		peers[agentID] = address
+		peers[agentID] = info
 		newVal, err := json.Marshal(peers)
 		if err != nil {
 			return fmt.Errorf("failed to marshal membership: %w", err)
@@ -142,14 +142,14 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID, address string) e
 }
 
 func (c *Cell) ApplyMembershipChange(value []byte) {
-	var peers map[string]string
+	var peers map[string]state.PeerInfo
 	if err := json.Unmarshal(value, &peers); err != nil {
 		glog.Errorf("Cell(%s): Failed to unmarshal membership map: %v", c.agentID, err)
 		return
 	}
 
-	for id, addr := range peers {
-		c.store.AddMember(id, addr)
+	for id, info := range peers {
+		c.store.AddMember(id, info)
 	}
 }
 
@@ -166,7 +166,7 @@ func (c *Cell) refreshPeers(ctx context.Context) {
 	newPeers := make(map[string]PeerClient)
 	var peerList []PeerClient
 
-	for id, addr := range members {
+	for id, info := range members {
 		if id == c.agentID {
 			continue
 		}
@@ -174,8 +174,8 @@ func (c *Cell) refreshPeers(ctx context.Context) {
 			newPeers[id] = p
 			peerList = append(peerList, p)
 		} else if c.peerFactory != nil {
-			glog.Infof("Cell(%s): Creating new client for peer %s at %s", c.agentID, id, addr)
-			p, err := c.peerFactory(id, addr)
+			glog.Infof("Cell(%s): Creating new client for peer %s at %s", c.agentID, id, info.GRPCAddr)
+			p, err := c.peerFactory(id, info.GRPCAddr)
 			if err != nil {
 				glog.Errorf("Cell(%s): Failed to create peer client for %s: %v", c.agentID, id, err)
 				continue
