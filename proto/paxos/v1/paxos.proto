@@ -27,6 +27,45 @@ service PaxosService {
   rpc GetPeerEndpoints(GetPeerEndpointsRequest) returns (GetPeerEndpointsResponse) {}
 }
 
+service UserService {
+  // Read the value of a specific key.
+  rpc Read(ReadRequest) returns (ReadResponse) {}
+
+  // Propose a write of a value for a specific key using Compare-and-Swap logic.
+  rpc CompareAndWrite(CompareAndWriteRequest) returns (CompareAndWriteResponse) {}
+}
+
+enum ReadQuorum {
+  READ_QUORUM_UNSPECIFIED = 0;
+  READ_QUORUM_LOCAL = 1;     // Read from current peer only
+  READ_QUORUM_MAJORITY = 2;  // Read value majority agrees on
+  READ_QUORUM_ALL = 3;       // Read value all peers agree on
+}
+
+message ReadRequest {
+  string key = 1;
+  ReadQuorum quorum = 2;
+}
+
+message ReadResponse {
+  string key = 1;
+  bytes value = 2;
+  string type = 3;
+  uint64 version = 4;
+}
+
+message CompareAndWriteRequest {
+  string key = 1;
+  bytes old_value = 2; // Expected old value
+  bytes new_value = 3; // Value to write
+}
+
+message CompareAndWriteResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 version = 3;
+}
+
 message EndpointInfo {
   string host_port = 1;
   string http_url = 2;
