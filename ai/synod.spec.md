@@ -27,6 +27,8 @@
 - Use "Conventional Commits 1.0.0" when creating commits.
 - When starting new work:
   - create a new git branch.
+    - If there are modified files or files in the index, make them part of
+      the new branch.
   - Git pull from main to ensure you are reasonably up to date. Use the `gh`
     utility for creatign pull requests.
     - Only create PRs against remote `main` branch.
