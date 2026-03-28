@@ -10,27 +10,15 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  tag:
     runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Required for fetching tags
-
-      - name: Cache Bazel
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/bazel-disk-cache
-            ~/.cache/bazel-repository-cache
-          key: ${{ runner.os }}-bazel-${{ hashFiles('MODULE.bazel.lock', 'go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-bazel-
-
-      - name: Setup Bazel
-        # Bazelisk is pre-installed on GitHub-hosted runners
-        run: bazel version
+          fetch-depth: 0
 
       - name: Bump version and push tag
         id: tag_version
@@ -40,31 +28,68 @@ jobs:
           default_bump: minor
           release_branches: main
 
-      - name: Build and Prepare Linux AMD64
-        run: |
-          bazel build -c opt --disk_cache=~/.cache/bazel-disk-cache --repository_cache=~/.cache/bazel-repository-cache --platforms=@rules_go//go/toolchain:linux_amd64 //cmd/agent
-          cp bazel-bin/cmd/agent/agent_/agent synod-agent-linux-amd64
-          chmod +x synod-agent-linux-amd64
+  build:
+    needs: tag
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: linux-amd64
+            platform: "@rules_go//go/toolchain:linux_amd64"
+          - arch: darwin-amd64
+            platform: "@rules_go//go/toolchain:darwin_amd64"
+          - arch: darwin-arm64
+            platform: "@rules_go//go/toolchain:darwin_arm64"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Build and Prepare macOS AMD64
-        run: |
-          bazel build -c opt --disk_cache=~/.cache/bazel-disk-cache --repository_cache=~/.cache/bazel-repository-cache --platforms=@rules_go//go/toolchain:darwin_amd64 //cmd/agent
-          cp bazel-bin/cmd/agent/agent_/agent synod-agent-darwin-amd64
-          chmod +x synod-agent-darwin-amd64
+      - name: Cache Bazel
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazel-repository-cache
+          key: ${{ runner.os }}-bazel-${{ matrix.arch }}-${{ hashFiles('MODULE.bazel.lock', 'go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-bazel-${{ matrix.arch }}-
 
-      - name: Build and Prepare macOS ARM64
+      - name: Set up Bazel
+        run: bazel version
+
+      - name: Build Agent Binary
         run: |
-          bazel build -c opt --disk_cache=~/.cache/bazel-disk-cache --repository_cache=~/.cache/bazel-repository-cache --platforms=@rules_go//go/toolchain:darwin_arm64 //cmd/agent
-          cp bazel-bin/cmd/agent/agent_/agent synod-agent-darwin-arm64
-          chmod +x synod-agent-darwin-arm64
+          bazel build -c opt \
+            --disk_cache=~/.cache/bazel-disk-cache \
+            --repository_cache=~/.cache/bazel-repository-cache \
+            --platforms=${{ matrix.platform }} \
+            //cmd/agent
+
+      - name: Prepare Artifact
+        run: |
+          cp bazel-bin/cmd/agent/agent_/agent synod-agent-${{ matrix.arch }}
+          chmod +x synod-agent-${{ matrix.arch }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synod-agent-${{ matrix.arch }}
+          path: synod-agent-${{ matrix.arch }}
+
+  release:
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag_version.outputs.new_tag }}
-          name: Release ${{ steps.tag_version.outputs.new_tag }}
-          files: |
-            synod-agent-linux-amd64
-            synod-agent-darwin-amd64
-            synod-agent-darwin-arm64
+          tag_name: ${{ needs.tag.outputs.new_tag }}
+          name: Release ${{ needs.tag.outputs.new_tag }}
+          files: artifacts/synod-agent-*
           generate_release_notes: true
