@@ -150,8 +150,19 @@
   all 5 peers are listed.
 
 
+### Presentation
+
+#### Update P.1:
+
+* Modify the Messages panel to use peer short names in place of UUIDs. For
+  completeness, however, add a table above the messages list, which shows a
+  mapping of short name to peer ID, and its API endpoints, which must be
+  hyperlinked.
+
 ## Bugs
 
 # B.1: /api/command
 
 The 'api/command' page is rendered as text, not as HTML, fix.
+
+
