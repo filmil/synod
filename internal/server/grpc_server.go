@@ -38,7 +38,16 @@ func (s *PaxosServer) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*
 }
 
 func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error) {
-	// Implementation for dynamic membership will go here.
+	glog.Infof("gRPC: Received JoinCluster from %s at %s", req.AgentId, req.HostPort)
+	err := s.cell.ProposeMembership(ctx, req.AgentId, req.HostPort)
+	if err != nil {
+		glog.Errorf("gRPC: JoinCluster failed: %v", err)
+		return &paxosv1.JoinClusterResponse{
+			AgentId: s.agentID,
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
 	return &paxosv1.JoinClusterResponse{
 		AgentId: s.agentID,
 		Success: true,
@@ -47,9 +56,23 @@ func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterR
 }
 
 func (s *PaxosServer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error) {
-	// Implementation for sync will go here.
+	index, ids := s.cell.GetSyncState()
 	return &paxosv1.SyncResponse{
-		AgentId: s.agentID,
+		AgentId:             s.agentID,
+		HighestLedgerIndex:  index,
+		AgentIds:            ids,
+	}, nil
+}
+
+func (s *PaxosServer) GetLedgerEntry(ctx context.Context, req *paxosv1.GetLedgerEntryRequest) (*paxosv1.GetLedgerEntryResponse, error) {
+	val, valType, err := s.store.GetLedgerEntry(req.LedgerIndex)
+	if err != nil {
+		return nil, err
+	}
+	return &paxosv1.GetLedgerEntryResponse{
+		LedgerIndex: req.LedgerIndex,
+		Value:       val,
+		Type:        valType,
 	}, nil
 }
 

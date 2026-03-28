@@ -9,6 +9,7 @@ go_library(
         "//internal/paxos",
         "//internal/server",
         "//internal/state",
+        "//proto/paxos/v1:paxos",
         "@com_github_golang_glog//:glog",
     ],
 )

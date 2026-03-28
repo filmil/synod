@@ -16,6 +16,9 @@
 * Use `bazel mod tidy` to update module versions in bazel.
 * Use `bazel run @rules_go//go -- <args>` to run the go binary, do not use `go` directly.
 * Use at least protobuf version 34.0, never downgrade.
+* If you need to write temporary files you can use the dir `local`. Prefer to
+  create files in a subdirectory of `local` keyed by this session's ID.
+  * Anything that needs to be preserved across sessions, store in `local/common`.
 
 ## Requirements
 
@@ -39,6 +42,8 @@
     from.
   * Have one page which shows the current participants in the paxos algorithm.
   * Have one page which shows what messages we received and what we replied.
+  * Have a page which shows the URLs (and links to) all the endpoints of all
+    known peers.
 * Serve a http endpoint to which a future command line tool can connect to issue
   commands to the paxos consensus cell.
 * Implement a Paxos decision algorithm based on this.

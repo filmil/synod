@@ -16,6 +16,9 @@ service PaxosService {
 
   // Used for continuously syncing up the view of agent identities.
   rpc Sync(SyncRequest) returns (SyncResponse) {}
+
+  // Fetch a ledger entry.
+  rpc GetLedgerEntry(GetLedgerEntryRequest) returns (GetLedgerEntryResponse) {}
 }
 
 message ProposalID {
@@ -70,4 +73,14 @@ message SyncResponse {
   string agent_id = 1;
   uint64 highest_ledger_index = 2;
   repeated string agent_ids = 3; // Simplified sync response
+}
+
+message GetLedgerEntryRequest {
+  uint64 ledger_index = 1;
+}
+
+message GetLedgerEntryResponse {
+  uint64 ledger_index = 1;
+  bytes value = 2;
+  string type = 3;
 }

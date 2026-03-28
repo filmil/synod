@@ -39,6 +39,18 @@ func (m *mockPeer) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 	return m.acceptResp, nil
 }
 
+func (m *mockPeer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error) {
+	return nil, nil
+}
+
+func (m *mockPeer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error) {
+	return nil, nil
+}
+
+func (m *mockPeer) GetLedgerEntry(ctx context.Context, req *paxosv1.GetLedgerEntryRequest) (*paxosv1.GetLedgerEntryResponse, error) {
+	return nil, nil
+}
+
 func (m *mockPeer) AgentID() string {
 	return m.agentID
 }

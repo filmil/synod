@@ -11,7 +11,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/state",
-        "//proto/paxos/v1:paxosv1_go_proto",
+        "//proto/paxos/v1:paxos",
         "@com_github_golang_glog//:glog",
         "@com_github_google_uuid//:uuid",
     ],
