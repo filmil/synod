@@ -21,6 +21,7 @@
   * Anything that needs to be preserved across sessions, store in `local/common`.
 * Never ignore errors: either propagate them with context attached, or log them.
 * Don't use `glog.Fatalf`, instead log at `glog.Errof` and call `os.Exit` instead.
+* Find and save LICENSE for all dirs in //third_party
 
 ## Requirements
 
@@ -76,6 +77,13 @@
 
 * For now, each agent must adopt a unique identity, let it be a UUID. Use this
   UUID for its lifeteime.
+
+#### Update I.1: short names
+
+* For each peer, adopt an identity which is a short human name.
+  * Download 1000 names, roughly half male, half female to pick.
+  * Associate each UUID with a short cell-unique human name, and use that name
+    in all dashboards.
 
 ### Dynamic consensus
 

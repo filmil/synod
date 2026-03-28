@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 
@@ -26,7 +27,7 @@ func NewHTTPServer(addr string, store *state.Store, cell *paxos.Cell) *HTTPServe
 	}
 }
 
-func (s *HTTPServer) Run() error {
+func (s *HTTPServer) Run(lis net.Listener) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/messages", s.handleMessages)
@@ -61,8 +62,7 @@ func (s *HTTPServer) Run() error {
 		http.ServeFile(w, r, path)
 	})
 
-	glog.Infof("HTTP server listening at %v", s.addr)
-	return http.ListenAndServe(s.addr, mux)
+	return http.Serve(lis, mux)
 }
 
 func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
