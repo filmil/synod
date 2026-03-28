@@ -178,6 +178,14 @@
 - Make a new feature: when printing JSON and proto, order fields lexicographically by name.
 - When printing maps, order the entries lexicographically by the string representation of the key.
 
+#### Update P.5: introspection
+
+- Make a new panel in the HTTP endpoint, which uses go runtime information to show
+  goroutine use and timing, memory use, CPU use if possible.
+- Add a button which if pressed makes a goroutine stack dump and presents on
+  the page.
+- Present in a tabular form.
+
 ### Safety
 
 #### Update S.1: exponential backoff
