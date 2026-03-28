@@ -22,6 +22,17 @@ top of another.
 For example, to get content from branch `main` from the `origin` repo use `git
 rebase --pull origin main`.
 
+### Rules for Bazel projects
+
+- Use go if you need to create scripts.
+- Save scripts into `//tools/ai` directory, you can freely add BUILD.bazel
+  file there and build targets to invoke.
+- Put each new script into its own new subdirectory, feel free to use that
+  subdir for all required work.
+- You can use library https://github.com/bitfield/script to get shell script
+  like functionality within go.
+- Use `bazel run` to run the script when you need it.
+
 ### Create pull request
 
 Use the `gh` utility to create the pull request.
