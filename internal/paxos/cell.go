@@ -114,6 +114,13 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 			return nil
 		}
 
+		// Enforce cell-unique short name
+		for id, peerInfo := range peers {
+			if id != agentID && peerInfo.ShortName == info.ShortName {
+				return fmt.Errorf("name rejected: short name %q is already taken", info.ShortName)
+			}
+		}
+
 		peers[agentID] = info
 		newVal, err := json.Marshal(peers)
 		if err != nil {
@@ -122,7 +129,7 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 
 		nextVersion := version + 1
 		instanceKey := fmt.Sprintf("%s@%d", key, nextVersion)
-		
+
 		glog.Infof("Cell(%s): Proposing membership for %s", c.agentID, instanceKey)
 
 		chosenValue, err := c.proposer.Propose(ctx, instanceKey, newVal)
@@ -346,7 +353,7 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 		for key, peerPropNum := range resp.Keys {
 			localPropNum, exists := localState[key]
 			if !exists || peerPropNum > localPropNum {
-				glog.Infof("Cell(%s): Peer %s has newer state for key %s (%d > %d), catching up...", 
+				glog.Infof("Cell(%s): Peer %s has newer state for key %s (%d > %d), catching up...",
 					c.agentID, p.AgentID(), key, peerPropNum, localPropNum)
 				c.CatchUp(ctx, p, key)
 				// Update local state map after catch up
@@ -371,12 +378,12 @@ func (c *Cell) CatchUp(ctx context.Context, p PeerClient, key string) {
 		return
 	}
 	glog.Infof("Cell(%s): Catching up entry %s type %s", c.agentID, key, resp.Type)
-	
+
 	// Ensure we also save the accepted value in the acceptor state so we don't propose over it with an older number
 	if err := c.store.SetAcceptedValue(key, &paxosv1.ProposalID{Number: resp.Version, AgentId: p.AgentID()}, resp.Value); err != nil {
 		glog.Errorf("Cell(%s): Failed to set accepted value during catchup: %v", c.agentID, err)
 	}
-	
+
 	if err := c.store.CommitKV(key, resp.Value, resp.Type, resp.Version); err != nil {
 		glog.Errorf("Cell(%s): Failed to commit caught up KV entry %s: %v", c.agentID, key, err)
 		return
