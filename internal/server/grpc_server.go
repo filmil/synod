@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net"
 
 	"github.com/filmil/synod/internal/paxos"
@@ -79,13 +78,8 @@ func (s *PaxosServer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryReq
 	}, nil
 }
 
-func RunGRPCServer(addr string, srv *PaxosServer) error {
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %w", err)
-	}
+func RunGRPCServer(lis net.Listener, srv *PaxosServer) error {
 	s := grpc.NewServer()
 	paxosv1.RegisterPaxosServiceServer(s, srv)
-	glog.Infof("gRPC server listening at %v", lis.Addr())
 	return s.Serve(lis)
 }

@@ -50,8 +50,23 @@ func main() {
 	}
 	glog.Infof("Starting Synod agent with ID: %s", agentID)
 
-	// Ensure self is in membership
-	if err := store.AddMember(agentID, *grpcAddr); err != nil {
+	// Create listeners with retry logic
+	grpcLis, err := server.ListenWithRetry(*grpcAddr)
+	if err != nil {
+		glog.Errorf("Failed to create gRPC listener: %v", err)
+		os.Exit(1)
+	}
+	finalGrpcAddr := grpcLis.Addr().String()
+
+	httpLis, err := server.ListenWithRetry(*httpAddr)
+	if err != nil {
+		glog.Errorf("Failed to create HTTP listener: %v", err)
+		os.Exit(1)
+	}
+	// finalHttpAddr := httpLis.Addr().String() // Not strictly needed for paxos consensus but good to know
+
+	// Ensure self is in membership with the ACTUAL port we are listening on
+	if err := store.AddMember(agentID, finalGrpcAddr); err != nil {
 		glog.Errorf("Failed to add self to membership: %v", err)
 		os.Exit(1)
 	}
@@ -74,7 +89,7 @@ func main() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			resp, err := client.JoinCluster(ctx, &paxosv1.JoinClusterRequest{
 				AgentId:  agentID,
-				HostPort: *grpcAddr,
+				HostPort: finalGrpcAddr,
 			})
 			cancel()
 			if err != nil {
@@ -109,7 +124,7 @@ func main() {
 	} else {
 		// Bootstrap node: propose ourselves to the KV store
 		glog.Infof("Bootstrapping new cluster, proposing self to /_internal/peers")
-		if err := cell.ProposeMembership(context.Background(), agentID, *grpcAddr); err != nil {
+		if err := cell.ProposeMembership(context.Background(), agentID, finalGrpcAddr); err != nil {
 			glog.Errorf("Failed to bootstrap membership: %v", err)
 			os.Exit(1)
 		}
@@ -122,12 +137,12 @@ func main() {
 	errChan := make(chan error, 2)
 
 	go func() {
-		errChan <- server.RunGRPCServer(*grpcAddr, paxosSrv)
+		errChan <- server.RunGRPCServer(grpcLis, paxosSrv)
 	}()
 
 	go func() {
 		httpSrv := server.NewHTTPServer(*httpAddr, store, cell)
-		errChan <- httpSrv.Run()
+		errChan <- httpSrv.Run(httpLis)
 	}()
 
 	glog.Infof("Synod agent is up and running")

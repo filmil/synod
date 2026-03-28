@@ -11,6 +11,7 @@ import (
 	"github.com/filmil/synod/internal/server"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
+	"github.com/golang/glog"
 )
 
 func TestIntegration_5Agents(t *testing.T) {
@@ -166,5 +167,10 @@ func newAgentInstance(t *testing.T, id, dir, addr string) *agentInstance {
 }
 
 func (a *agentInstance) run() {
-	server.RunGRPCServer(a.addr, a.srv)
+	lis, err := server.ListenWithRetry(a.addr)
+	if err != nil {
+		glog.Errorf("failed to listen: %v", err)
+		return
+	}
+	server.RunGRPCServer(lis, a.srv)
 }

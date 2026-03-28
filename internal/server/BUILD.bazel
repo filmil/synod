@@ -6,6 +6,7 @@ go_library(
         "grpc_client.go",
         "grpc_server.go",
         "http_server.go",
+        "listen.go",
     ],
     importpath = "github.com/filmil/synod/internal/server",
     visibility = ["//visibility:public"],
