@@ -6,6 +6,7 @@ go_library(
     importpath = "github.com/filmil/synod/cmd/agent",
     visibility = ["//visibility:private"],
     deps = [
+        "//internal/names",
         "//internal/paxos",
         "//internal/server",
         "//internal/state",

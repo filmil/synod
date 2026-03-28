@@ -86,20 +86,40 @@ func (s *Store) init() error {
 	return nil
 }
 
-func (s *Store) GetAgentID() (string, error) {
-	var id string
+func (s *Store) GetAgentID() (string, string, error) {
+	var id, shortName string
 	err := s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'agent_id'").Scan(&id)
-	if err == sql.ErrNoRows {
-		id = uuid.New().String()
-		if _, err := s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('agent_id', ?)", id); err != nil {
-			return "", fmt.Errorf("failed to insert new agent ID: %w", err)
+	err2 := s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'short_name'").Scan(&shortName)
+
+	if err == sql.ErrNoRows || err2 == sql.ErrNoRows {
+		if id == "" {
+			id = uuid.New().String()
+			if _, e := s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('agent_id', ?)", id); e != nil {
+				return "", "", fmt.Errorf("failed to insert new agent ID: %w", e)
+			}
+			glog.Infof("Generated new agent ID: %s", id)
 		}
-		glog.Infof("Generated new agent ID: %s", id)
-		return id, nil
+		if shortName == "" {
+			shortName = "PendingName" // We will replace this with a real name via the caller
+			if _, e := s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('short_name', ?)", shortName); e != nil {
+				return "", "", fmt.Errorf("failed to insert new short name: %w", e)
+			}
+		}
+		return id, shortName, nil
 	} else if err != nil {
-		return "", fmt.Errorf("failed to query agent ID: %w", err)
+		return "", "", fmt.Errorf("failed to query agent ID: %w", err)
+	} else if err2 != nil {
+		return "", "", fmt.Errorf("failed to query short name: %w", err2)
 	}
-	return id, nil
+	return id, shortName, nil
+}
+
+func (s *Store) SetShortName(shortName string) error {
+	_, err := s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('short_name', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", shortName)
+	if err != nil {
+		return fmt.Errorf("failed to set short name: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) Close() error {
