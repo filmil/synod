@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -52,16 +53,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// If the node has no short name, generate one now.
-	if shortName == "PendingName" || shortName == "" {
-		shortName = names.Generate()
-		if err := store.SetShortName(shortName); err != nil {
-			glog.Errorf("Failed to set new short name: %v", err)
-		}
-	}
-
-	glog.Infof("Starting Synod agent with ID: %s, Name: %s", agentID, shortName)
-
 	// Create listeners with retry logic
 	grpcLis, err := server.ListenWithRetry(*grpcAddr)
 	if err != nil {
@@ -75,9 +66,59 @@ func main() {
 		glog.Errorf("Failed to create HTTP listener: %v", err)
 		os.Exit(1)
 	}
-	// finalHttpAddr := httpLis.Addr().String() // Not strictly needed for paxos consensus but good to know
 
-	// Ensure self is in membership with the ACTUAL port we are listening on
+	peerFactory := func(id, addr string) (paxos.PeerClient, error) {
+		return server.NewPaxosClient(id, addr)
+	}
+
+	acceptor := paxos.NewAcceptor(agentID, store)
+	cell := paxos.NewCell(agentID, store, acceptor, peerFactory)
+	paxosSrv := server.NewPaxosServer(agentID, store, acceptor, cell)
+
+	var existingPeers map[string]state.PeerInfo
+	var joinClient *server.PaxosClient
+
+	if *peerAddr != "" {
+		glog.Infof("Attempting to fetch peer info from: %s", *peerAddr)
+		joinClient, err = server.NewPaxosClient("temp-peer", *peerAddr)
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			kvResp, err := joinClient.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
+			cancel()
+			if err == nil && kvResp.Value != nil {
+				json.Unmarshal(kvResp.Value, &existingPeers)
+			}
+		} else {
+			glog.Errorf("Failed to connect to join peer %s: %v", *peerAddr, err)
+		}
+	}
+
+	index := len(existingPeers)
+
+	// If the node has no short name, generate one based on the cluster index.
+	for {
+		if shortName == "PendingName" || shortName == "" {
+			shortName = names.GenerateForIndex(index)
+		}
+		taken := false
+		for id, p := range existingPeers {
+			if id != agentID && p.ShortName == shortName {
+				taken = true
+				break
+			}
+		}
+		if !taken {
+			break
+		}
+		shortName = "" // Regenerate
+	}
+
+	if err := store.SetShortName(shortName); err != nil {
+		glog.Errorf("Failed to set new short name: %v", err)
+	}
+
+	glog.Infof("Starting Synod agent with ID: %s, Name: %s", agentID, shortName)
+
 	selfInfo := state.PeerInfo{
 		GRPCAddr:  finalGrpcAddr,
 		HTTPURL:   fmt.Sprintf("http://%s", httpLis.Addr().String()),
@@ -88,49 +129,49 @@ func main() {
 		os.Exit(1)
 	}
 
-	peerFactory := func(id, addr string) (paxos.PeerClient, error) {
-		return server.NewPaxosClient(id, addr)
-	}
-
-	acceptor := paxos.NewAcceptor(agentID, store)
-	cell := paxos.NewCell(agentID, store, acceptor, peerFactory)
-	paxosSrv := server.NewPaxosServer(agentID, store, acceptor, cell)
-
 	// If a peer is provided, we join the cluster.
 	if *peerAddr != "" {
-		glog.Infof("Attempting to join cluster via peer: %s", *peerAddr)
-		client, err := server.NewPaxosClient("temp-peer", *peerAddr)
-		if err != nil {
-			glog.Errorf("Failed to connect to join peer %s: %v", *peerAddr, err)
-		} else {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			resp, err := client.JoinCluster(ctx, &paxosv1.JoinClusterRequest{
-				AgentId:   agentID,
-				HostPort:  finalGrpcAddr,
-				ShortName: shortName,
-				HttpUrl:   selfInfo.HTTPURL,
-			})
-			cancel()
-			if err != nil {
-				glog.Errorf("JoinCluster failed: %v", err)
-			} else if !resp.Success {
-				glog.Errorf("JoinCluster rejected: %s", resp.Message)
-			} else {
-				glog.Infof("Successfully joined cluster via %s", resp.AgentId)
-				// Add the peer we joined to membership so we can sync. Since we don't have its full info, we store a stub.
-				// It will be overwritten by the KV consensus download immediately after.
-				if err := store.AddMember(resp.AgentId, state.PeerInfo{GRPCAddr: *peerAddr, ShortName: "Unknown"}); err != nil {
+		if joinClient != nil {
+			var joinedAgentID string
+			for {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				resp, err := joinClient.JoinCluster(ctx, &paxosv1.JoinClusterRequest{
+					AgentId:   agentID,
+					HostPort:  finalGrpcAddr,
+					ShortName: shortName,
+					HttpUrl:   selfInfo.HTTPURL,
+				})
+				cancel()
+
+				if err != nil {
+					glog.Errorf("JoinCluster failed: %v", err)
+					break
+				} else if !resp.Success {
+					glog.Errorf("JoinCluster rejected: %s. Retrying with a new name...", resp.Message)
+					shortName = names.GenerateForIndex(index)
+					selfInfo.ShortName = shortName
+					store.SetShortName(shortName)
+					continue
+				} else {
+					glog.Infof("Successfully joined cluster via %s", resp.AgentId)
+					joinedAgentID = resp.AgentId
+					break
+				}
+			}
+
+			if joinedAgentID != "" {
+				if err := store.AddMember(joinedAgentID, state.PeerInfo{GRPCAddr: *peerAddr, ShortName: "Unknown"}); err != nil {
 					glog.Errorf("Failed to add join peer to membership: %v", err)
 				}
 
 				// Download the consensus value of the list of peers
-				ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-				kvResp, err := client.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				kvResp, err := joinClient.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
 				cancel()
 				if err != nil {
 					glog.Errorf("Failed to get peers from join node: %v", err)
 				} else if kvResp.Value != nil {
-					if err := store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: resp.AgentId}, kvResp.Value); err != nil {
+					if err := store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: joinedAgentID}, kvResp.Value); err != nil {
 						glog.Errorf("Failed to set accepted value for peers: %v", err)
 					}
 					if err := store.CommitKV("/_internal/peers", kvResp.Value, "membership", kvResp.Version); err != nil {
@@ -145,7 +186,7 @@ func main() {
 					glog.Errorf("Failed to add self to membership after joining: %v", err)
 				}
 			}
-			client.Close()
+			joinClient.Close()
 		}
 	} else {
 		// Bootstrap node: propose ourselves to the KV store
