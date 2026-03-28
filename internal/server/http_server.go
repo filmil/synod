@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/bazelbuild/rules_go/go/runfiles"
@@ -354,7 +355,7 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
                   <td>%s</td>
                   <td>%s</td>
                   <td>%s</td>
-                </tr>`, e.ID, e.Timestamp, e.Type, senderName, receiverName, maybeJSONToTable([]byte(e.Message)), maybeJSONToTable([]byte(e.Reply)))
+                </tr>`, e.ID, e.Timestamp, e.Type, senderName, receiverName, prototextToTable(e.Message), prototextToTable(e.Reply))
 	}
 
 	fmt.Fprintf(w, `
@@ -575,4 +576,69 @@ func renderJSONNode(node interface{}) string {
 	default:
 		return html.EscapeString(fmt.Sprintf("%v", v))
 	}
+}
+
+// prototextToTable parses a simple Protobuf text format string into a hierarchical HTML table.
+func prototextToTable(text string) string {
+	if len(text) == 0 {
+		return ""
+	}
+
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	var sb strings.Builder
+	sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		if line == "}" {
+			sb.WriteString(`</tbody></table></td></tr>`)
+			continue
+		}
+
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 1 {
+			// Possibly an opening block: "key {"
+			if strings.HasSuffix(line, "{") {
+				key := strings.TrimSpace(strings.TrimSuffix(line, "{"))
+				sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td><table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%%;"><tbody>`, html.EscapeString(key)))
+			} else {
+				sb.WriteString(fmt.Sprintf(`<tr><td colspan="2">%s</td></tr>`, html.EscapeString(line)))
+			}
+		} else {
+			key := strings.TrimSpace(parts[0])
+			val := strings.TrimSpace(parts[1])
+
+			if strings.HasSuffix(val, "{") {
+				key2 := strings.TrimSpace(strings.TrimSuffix(val, "{"))
+				if key2 != "" {
+					key = key + " " + key2
+				}
+				sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td><table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%%;"><tbody>`, html.EscapeString(key)))
+			} else {
+				// Specifically attempt to decode "value" as JSON, as requested
+				if key == "value" {
+					if unquoted, err := strconv.Unquote(val); err == nil {
+						var obj interface{}
+						if err := json.Unmarshal([]byte(unquoted), &obj); err == nil {
+							sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(key), renderJSONNode(obj)))
+							continue
+						}
+					}
+				}
+
+				// Remove quotes
+				if strings.HasPrefix(val, `"`) && strings.HasSuffix(val, `"`) {
+					val = val[1 : len(val)-1]
+				}
+				sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(key), html.EscapeString(val)))
+			}
+		}
+	}
+
+	sb.WriteString(`</tbody></table>`)
+	return sb.String()
 }
