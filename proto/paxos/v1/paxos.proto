@@ -22,6 +22,22 @@ service PaxosService {
 
   // Ping an agent.
   rpc Ping(PingRequest) returns (PingResponse) {}
+
+  // Fetch known endpoints for all peers.
+  rpc GetPeerEndpoints(GetPeerEndpointsRequest) returns (GetPeerEndpointsResponse) {}
+}
+
+message EndpointInfo {
+  string host_port = 1;
+  string http_url = 2;
+}
+
+message GetPeerEndpointsRequest {
+  string agent_id = 1;
+}
+
+message GetPeerEndpointsResponse {
+  map<string, EndpointInfo> endpoints = 1; // Agent ID -> Endpoints
 }
 
 message ProposalID {

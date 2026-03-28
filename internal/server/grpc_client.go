@@ -51,6 +51,10 @@ func (c *PaxosClient) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxo
 	return c.client.Ping(ctx, req)
 }
 
+func (c *PaxosClient) GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeerEndpointsRequest) (*paxosv1.GetPeerEndpointsResponse, error) {
+	return c.client.GetPeerEndpoints(ctx, req)
+}
+
 func (c *PaxosClient) AgentID() string {
 	return c.agentID
 }

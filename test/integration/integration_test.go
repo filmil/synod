@@ -129,6 +129,7 @@ func TestIntegration_5Agents(t *testing.T) {
 	// Start sync loops for all agents
 	for i := 0; i < numAgents; i++ {
 		agents[i].cell.StartSyncLoop(context.Background(), 1*time.Second)
+		agents[i].cell.StartEndpointSyncLoop(context.Background(), 2*time.Second)
 	}
 
 	// Wait for all agents to sync up the membership
