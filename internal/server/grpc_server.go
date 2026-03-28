@@ -14,14 +14,18 @@ import (
 
 type PaxosServer struct {
 	paxosv1.UnimplementedPaxosServiceServer
+	agentID  string
 	acceptor *paxos.Acceptor
 	store    *state.Store
+	cell     *paxos.Cell
 }
 
-func NewPaxosServer(store *state.Store, acceptor *paxos.Acceptor) *PaxosServer {
+func NewPaxosServer(agentID string, store *state.Store, acceptor *paxos.Acceptor, cell *paxos.Cell) *PaxosServer {
 	return &PaxosServer{
+		agentID:  agentID,
 		acceptor: acceptor,
 		store:    store,
+		cell:     cell,
 	}
 }
 
@@ -35,12 +39,18 @@ func (s *PaxosServer) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*
 
 func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error) {
 	// Implementation for dynamic membership will go here.
-	return &paxosv1.JoinClusterResponse{Success: true, Message: "Join accepted"}, nil
+	return &paxosv1.JoinClusterResponse{
+		AgentId: s.agentID,
+		Success: true,
+		Message: "Join accepted",
+	}, nil
 }
 
 func (s *PaxosServer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error) {
 	// Implementation for sync will go here.
-	return &paxosv1.SyncResponse{}, nil
+	return &paxosv1.SyncResponse{
+		AgentId: s.agentID,
+	}, nil
 }
 
 func RunGRPCServer(addr string, srv *PaxosServer) error {

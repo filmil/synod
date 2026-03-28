@@ -10,9 +10,9 @@ go_library(
     importpath = "github.com/filmil/synod/internal/server",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/paxos:paxos",
-        "//internal/state:state",
-        "//proto/paxos/v1:paxos",
+        "//internal/paxos",
+        "//internal/state",
+        "//proto/paxos/v1:paxosv1_go_proto",
         "@com_github_golang_glog//:glog",
         "@org_golang_google_grpc//:grpc",
         "@org_golang_google_grpc//credentials/insecure",

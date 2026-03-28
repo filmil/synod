@@ -1,16 +1,30 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "paxos",
     srcs = [
         "acceptor.go",
+        "cell.go",
         "proposer.go",
     ],
     importpath = "github.com/filmil/synod/internal/paxos",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/state:state",
-        "//proto/paxos/v1:paxos",
+        "//internal/state",
+        "//proto/paxos/v1:paxosv1_go_proto",
         "@com_github_golang_glog//:glog",
+        "@com_github_google_uuid//:uuid",
+    ],
+)
+
+go_test(
+    name = "paxos_test",
+    srcs = [
+        "acceptor_test.go",
+        "proposer_test.go",
+    ],
+    embed = [":paxos"],
+    deps = [
+        "//internal/state",
     ],
 )

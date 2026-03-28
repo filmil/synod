@@ -33,14 +33,23 @@
 * Serve a gRPC endpoint that can be used for agents to reach out to each other.
 * Serve a http end point which serves a rudimentary web page allowing users to
   monitor the state of the algorithm.
+  * Use locally saved bootstrap library to style the pages. Make them reasonably
+    pretty.
+  * Use multi-card design so that we can have multiple status pages to select
+    from.
   * Have one page which shows the current participants in the paxos algorithm.
+  * Have one page which shows what messages we received and what we replied.
 * Serve a http endpoint to which a future command line tool can connect to issue
   commands to the paxos consensus cell.
-* Implement a Paxos decision algorithm based on this
+* Implement a Paxos decision algorithm based on this.
 * Formulate unit tests for each behavior of the Paxos algorithm.
+* Each Paxos message must include the identity of the sender.
+* Each Paxos message must include a nonce which helps disambiguate between
+  identical proposals from different agents.
 * Formulate unit tests for each changes.
 * Ensure that all bazel tests pass.
 * Ensure that bazel build passes after each change.
+* Add logging at each important decision point in the algorithm.
 
 ### Identities
 
@@ -57,3 +66,11 @@
 * When joining a new paxos cell, all currently present agents must agree to admit
   the new agent. Once that is done, the agent is admitted and can take part in
   decisions. Else, that agent will be ignored.
+
+### Testing
+
+
+* Unit tests for each bit of functionality.
+* Add an integration test, which starts 5 processes which communicate between
+  each other, and just send a command for all to exit. Once they all agree,
+  finish. If they take more than 2 minutes, say it's a timeout.
