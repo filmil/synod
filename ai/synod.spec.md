@@ -166,6 +166,15 @@
   different values for reload periods: 1 second, 10 seconds, 30 seconds, 1 minute
   5 minutes, 10 minutes, 20 minutes, 30 minutes, 1 hour.
 
+#### Update P.3
+
+* Prettify the "Recent messages" column "request" in the "Messages" page:
+  * Parse the individual components of each message and display them as
+    a set of hierarchical table cells confined within the existing cell.
+* Prettify the "KV store" panel display: attempt to parse each value as JSON.
+  If parsing is a success, then pretty print the JSON again as a hierarchical
+  table.
+
 ## Bugs
 
 # B.1: /api/command
