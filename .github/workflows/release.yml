@@ -30,18 +30,31 @@ jobs:
           default_bump: minor
           release_branches: main
 
-      - name: Build Agent Binary
-        run: bazel build -c opt //cmd/agent
-
-      - name: Prepare Artifact
+      - name: Build and Prepare Linux AMD64
         run: |
+          bazel build -c opt --platforms=@rules_go//go/toolchain:linux_amd64 //cmd/agent
           cp bazel-bin/cmd/agent/agent_/agent synod-agent-linux-amd64
           chmod +x synod-agent-linux-amd64
+
+      - name: Build and Prepare macOS AMD64
+        run: |
+          bazel build -c opt --platforms=@rules_go//go/toolchain:darwin_amd64 //cmd/agent
+          cp bazel-bin/cmd/agent/agent_/agent synod-agent-darwin-amd64
+          chmod +x synod-agent-darwin-amd64
+
+      - name: Build and Prepare macOS ARM64
+        run: |
+          bazel build -c opt --platforms=@rules_go//go/toolchain:darwin_arm64 //cmd/agent
+          cp bazel-bin/cmd/agent/agent_/agent synod-agent-darwin-arm64
+          chmod +x synod-agent-darwin-arm64
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag_version.outputs.new_tag }}
           name: Release ${{ steps.tag_version.outputs.new_tag }}
-          files: synod-agent-linux-amd64
+          files: |
+            synod-agent-linux-amd64
+            synod-agent-darwin-amd64
+            synod-agent-darwin-arm64
           generate_release_notes: true
