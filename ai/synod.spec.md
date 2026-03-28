@@ -23,6 +23,7 @@
 * Don't use `glog.Fatalf`, instead log at `glog.Errof` and call `os.Exit` instead.
 * Find and save LICENSE for all dirs in //third_party
 * Use "Conventional Commits 1.0.0" when creating commits.
+* When starting new work, create a new git branch.
 
 ### Update P.1
 
@@ -120,6 +121,9 @@
 * Add an integration test, which starts 5 processes which communicate between
   each other, and just send a command for all to exit. Once they all agree,
   finish. If they take more than 2 minutes, say it's a timeout.
+* Add a unit test which starts 5 agents in a cell, then visits each one's
+  HTTP endpoints, and verifies that in each of the outputs respectively
+  all 5 peers are listed.
 
 
 ## Bugs
