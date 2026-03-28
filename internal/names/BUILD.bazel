@@ -3,11 +3,11 @@ load("@rules_go//go:def.bzl", "go_library")
 go_library(
     name = "names",
     srcs = ["names.go"],
+    data = ["names.txt"],
     importpath = "github.com/filmil/synod/internal/names",
     visibility = ["//visibility:public"],
-    data = ["names.txt"],
     deps = [
         "@com_github_golang_glog//:glog",
-        "@rules_go//go/runfiles:go_default_library",
+        "@rules_go//go/runfiles",
     ],
 )
