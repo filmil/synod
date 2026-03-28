@@ -32,24 +32,28 @@ func main() {
 	// Ensure stateDir is absolute
 	absStateDir, err := filepath.Abs(*stateDir)
 	if err != nil {
-		glog.Fatalf("Failed to resolve absolute path for state_dir: %v", err)
+		glog.Errorf("Failed to resolve absolute path for state_dir: %v", err)
+		os.Exit(1)
 	}
 
 	store, err := state.NewStore(absStateDir)
 	if err != nil {
-		glog.Fatalf("Failed to initialize state store: %v", err)
+		glog.Errorf("Failed to initialize state store: %v", err)
+		os.Exit(1)
 	}
 	defer store.Close()
 
 	agentID, err := store.GetAgentID()
 	if err != nil {
-		glog.Fatalf("Failed to get agent ID: %v", err)
+		glog.Errorf("Failed to get agent ID: %v", err)
+		os.Exit(1)
 	}
 	glog.Infof("Starting Synod agent with ID: %s", agentID)
 
 	// Ensure self is in membership
 	if err := store.AddMember(agentID, *grpcAddr); err != nil {
-		glog.Fatalf("Failed to add self to membership: %v", err)
+		glog.Errorf("Failed to add self to membership: %v", err)
+		os.Exit(1)
 	}
 
 	peerFactory := func(id, addr string) (paxos.PeerClient, error) {
@@ -83,8 +87,31 @@ func main() {
 				if err := store.AddMember(resp.AgentId, *peerAddr); err != nil {
 					glog.Errorf("Failed to add join peer to membership: %v", err)
 				}
+				
+				// Download the consensus value of the list of peers
+				ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+				kvResp, err := client.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
+				cancel()
+				if err != nil {
+					glog.Errorf("Failed to get peers from join node: %v", err)
+				} else if kvResp.Value != nil {
+					if err := store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: resp.AgentId}, kvResp.Value); err != nil {
+						glog.Errorf("Failed to set accepted value for peers: %v", err)
+					}
+					if err := store.CommitKV("/_internal/peers", kvResp.Value, "membership", kvResp.Version); err != nil {
+						glog.Errorf("Failed to commit peers KV: %v", err)
+					}
+					cell.ApplyMembershipChange(kvResp.Value)
+				}
 			}
 			client.Close()
+		}
+	} else {
+		// Bootstrap node: propose ourselves to the KV store
+		glog.Infof("Bootstrapping new cluster, proposing self to /_internal/peers")
+		if err := cell.ProposeMembership(context.Background(), agentID, *grpcAddr); err != nil {
+			glog.Errorf("Failed to bootstrap membership: %v", err)
+			os.Exit(1)
 		}
 	}
 
@@ -106,6 +133,7 @@ func main() {
 	glog.Infof("Synod agent is up and running")
 	
 	if err := <-errChan; err != nil {
-		glog.Fatalf("Server error: %v", err)
+		glog.Errorf("Server error: %v", err)
+		os.Exit(1)
 	}
 }

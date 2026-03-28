@@ -9,6 +9,7 @@ go_library(
     ],
     importpath = "github.com/filmil/synod/internal/server",
     visibility = ["//visibility:public"],
+    data = ["//third_party/bootstrap"],
     deps = [
         "//internal/paxos",
         "//internal/state",
@@ -16,5 +17,6 @@ go_library(
         "@com_github_golang_glog//:glog",
         "@org_golang_google_grpc//:grpc",
         "@org_golang_google_grpc//credentials/insecure",
+        "@rules_go//go/runfiles:go_default_library",
     ],
 )

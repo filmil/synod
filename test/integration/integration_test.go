@@ -36,6 +36,11 @@ func TestIntegration_5Agents(t *testing.T) {
 		t.Fatalf("failed to add member: %v", err)
 	}
 
+	// Bootstrap agent-0's KV store with itself
+	if err := agents[0].cell.ProposeMembership(context.Background(), "agent-0", addr0); err != nil {
+		t.Fatalf("failed to bootstrap membership for agent-0: %v", err)
+	}
+
 	// Start other agents and join them to agent-0
 	for i := 1; i < numAgents; i++ {
 		tmpDir, err := os.MkdirTemp("", fmt.Sprintf("paxos-int-test-%d-*", i))
@@ -74,6 +79,23 @@ func TestIntegration_5Agents(t *testing.T) {
 		if err := agents[i].store.AddMember(resp.AgentId, addr0); err != nil {
 			t.Fatalf("Failed to add join peer to membership for agent-%d: %v", i, err)
 		}
+
+		// Download consensus value of peers
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		kvResp, err := client.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
+		cancel()
+		if err != nil {
+			t.Fatalf("Failed to get peers from join node: %v", err)
+		} else if kvResp.Value != nil {
+			if err := agents[i].store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: resp.AgentId}, kvResp.Value); err != nil {
+				t.Fatalf("Failed to set accepted value for peers: %v", err)
+			}
+			if err := agents[i].store.CommitKV("/_internal/peers", kvResp.Value, "membership", kvResp.Version); err != nil {
+				t.Fatalf("Failed to commit peers KV: %v", err)
+			}
+			agents[i].cell.ApplyMembershipChange(kvResp.Value)
+		}
+		
 		client.Close()
 	}
 
@@ -89,7 +111,7 @@ func TestIntegration_5Agents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	err := agents[0].cell.Propose(ctx, "/app/state", []byte("exit"))
+	err = agents[0].cell.Propose(ctx, "/app/state", []byte("exit"))
 	if err != nil {
 		t.Fatalf("Consensus on '/app/state' failed: %v", err)
 	}
@@ -99,7 +121,7 @@ func TestIntegration_5Agents(t *testing.T) {
 
 	// Verify that all agents reached consensus on the "exit" command
 	for i := 0; i < numAgents; i++ {
-		val, valType, _, getErr := agents[i].store.GetKVEntry("/app/state")
+		val, valType, _, _, getErr := agents[i].store.GetKVEntry("/app/state")
 		if getErr != nil {
 			t.Errorf("Agent %d: failed to get KV entry for /app/state: %v", i, getErr)
 			continue
