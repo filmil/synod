@@ -18,6 +18,16 @@ jobs:
         with:
           fetch-depth: 0 # Required for fetching tags
 
+      - name: Cache Bazel
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazel-repository-cache
+          key: ${{ runner.os }}-bazel-${{ hashFiles('MODULE.bazel.lock', 'go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-bazel-
+
       - name: Setup Bazel
         # Bazelisk is pre-installed on GitHub-hosted runners
         run: bazel version
@@ -32,19 +42,19 @@ jobs:
 
       - name: Build and Prepare Linux AMD64
         run: |
-          bazel build -c opt --platforms=@rules_go//go/toolchain:linux_amd64 //cmd/agent
+          bazel build -c opt --disk_cache=~/.cache/bazel-disk-cache --repository_cache=~/.cache/bazel-repository-cache --platforms=@rules_go//go/toolchain:linux_amd64 //cmd/agent
           cp bazel-bin/cmd/agent/agent_/agent synod-agent-linux-amd64
           chmod +x synod-agent-linux-amd64
 
       - name: Build and Prepare macOS AMD64
         run: |
-          bazel build -c opt --platforms=@rules_go//go/toolchain:darwin_amd64 //cmd/agent
+          bazel build -c opt --disk_cache=~/.cache/bazel-disk-cache --repository_cache=~/.cache/bazel-repository-cache --platforms=@rules_go//go/toolchain:darwin_amd64 //cmd/agent
           cp bazel-bin/cmd/agent/agent_/agent synod-agent-darwin-amd64
           chmod +x synod-agent-darwin-amd64
 
       - name: Build and Prepare macOS ARM64
         run: |
-          bazel build -c opt --platforms=@rules_go//go/toolchain:darwin_arm64 //cmd/agent
+          bazel build -c opt --disk_cache=~/.cache/bazel-disk-cache --repository_cache=~/.cache/bazel-repository-cache --platforms=@rules_go//go/toolchain:darwin_arm64 //cmd/agent
           cp bazel-bin/cmd/agent/agent_/agent synod-agent-darwin-arm64
           chmod +x synod-agent-darwin-arm64
 
