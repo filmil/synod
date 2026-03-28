@@ -34,14 +34,12 @@ func TestIntegration_5Agents(t *testing.T) {
 	addr0 := "127.0.0.1:0"
 	agents[0] = newAgentInstance(t, "agent-0", tmpDir0, addr0)
 	go agents[0].run()
-	
+
 	// Wait for agent-0 to be up and get its actual address
 	time.Sleep(500 * time.Millisecond)
 	addr0 = agents[0].grpcAddr
 
 	info0 := state.PeerInfo{
-		GRPCAddr:  addr0,
-		HTTPURL:   agents[0].httpURL,
 		ShortName: "agent-0-name",
 	}
 
@@ -68,8 +66,6 @@ func TestIntegration_5Agents(t *testing.T) {
 		time.Sleep(500 * time.Millisecond) // Wait for server to be up
 
 		infoI := state.PeerInfo{
-			GRPCAddr:  agents[i].grpcAddr,
-			HTTPURL:   agents[i].httpURL,
 			ShortName: fmt.Sprintf("agent-%d-name", i),
 		}
 
@@ -88,7 +84,7 @@ func TestIntegration_5Agents(t *testing.T) {
 			AgentId:   agents[i].id,
 			HostPort:  agents[i].grpcAddr,
 			ShortName: infoI.ShortName,
-			HttpUrl:   infoI.HTTPURL,
+			HttpUrl:   agents[i].httpURL,
 		})
 		cancel()
 		if err != nil {
@@ -101,6 +97,8 @@ func TestIntegration_5Agents(t *testing.T) {
 		if err := agents[i].store.AddMember(resp.AgentId, info0); err != nil {
 			t.Fatalf("Failed to add join peer to membership for agent-%d: %v", i, err)
 		}
+		// Also add agent-0 to ephemeral map so we can talk to it
+		agents[i].cell.UpdateEphemeralPeer(resp.AgentId, addr0, agents[0].httpURL)
 
 		// Download consensus value of peers
 		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
@@ -117,10 +115,10 @@ func TestIntegration_5Agents(t *testing.T) {
 			}
 			agents[i].cell.ApplyMembershipChange(kvResp.Value)
 		}
-		
+
 		client.Close()
-		
-		// Propose self to the cluster via agent-0 (since we already joined it)
+
+		// Propose the new agent to the cluster via agent-0 (since we already joined it)
 		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 		if err := agents[0].cell.ProposeMembership(ctx, agents[i].id, infoI); err != nil {
 			t.Fatalf("Failed to propose membership for agent-%d: %v", i, err)
@@ -149,7 +147,7 @@ func TestIntegration_5Agents(t *testing.T) {
 			t.Errorf("Agent %d: failed to read /peers body: %v", i, err)
 			continue
 		}
-		
+
 		content := string(body)
 		for j := 0; j < numAgents; j++ {
 			expectedID := fmt.Sprintf("agent-%d", j)
@@ -157,13 +155,13 @@ func TestIntegration_5Agents(t *testing.T) {
 			// Let's check both or just the main page.
 			// Actually handlePeers excludes self: if id != agentID { ids = append(ids, id) }
 			if i == j {
-				continue 
+				continue
 			}
 			if !strings.Contains(content, expectedID) {
 				t.Errorf("Agent %d: /peers does not contain expected peer %s", i, expectedID)
 			}
 		}
-		
+
 		// Also check index page which should have all participants including self
 		resp, err = http.Get(agents[i].httpURL + "/")
 		if err != nil {
@@ -232,7 +230,7 @@ func newAgentInstance(t *testing.T, id, dir, addr string) *agentInstance {
 	}
 
 	acceptor := paxos.NewAcceptor(id, store)
-	cell := paxos.NewCell(id, store, acceptor, peerFactory)
+	cell := paxos.NewCell(id, store, acceptor, peerFactory, "", "")
 	srv := server.NewPaxosServer(id, store, acceptor, cell)
 
 	return &agentInstance{
@@ -261,6 +259,8 @@ func (a *agentInstance) run() {
 		return
 	}
 	a.httpURL = fmt.Sprintf("http://%s", httpLis.Addr().String())
+
+	a.cell.SetSelfAddress(a.grpcAddr, a.httpURL)
 
 	go func() {
 		server.RunGRPCServer(ctx, grpcLis, a.srv)

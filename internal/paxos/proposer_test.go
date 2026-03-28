@@ -58,7 +58,15 @@ func (m *mockPeer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryReques
 }
 
 func (m *mockPeer) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error) {
-	return nil, m.err
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &paxosv1.PingResponse{
+		AgentId:  m.agentID,
+		Nonce:    req.Nonce,
+		HostPort: "localhost:1234",
+		HttpUrl:  "http://localhost:1234",
+	}, nil
 }
 
 func (m *mockPeer) AgentID() string {
@@ -80,16 +88,16 @@ func TestProposer_Success(t *testing.T) {
 
 	agentID := "proposer-agent"
 	acceptor := NewAcceptor(agentID, store)
-	
+
 	// Setup 2 mock peers to make a total of 3 agents (quorum = 2)
 	peers := []PeerClient{
 		&mockPeer{
-			agentID: "peer-1",
+			agentID:     "peer-1",
 			prepareResp: &paxosv1.PromiseResponse{Promised: true, AgentId: "peer-1"},
 			acceptResp:  &paxosv1.AcceptedResponse{Accepted: true, AgentId: "peer-1"},
 		},
 		&mockPeer{
-			agentID: "peer-2",
+			agentID:     "peer-2",
 			prepareResp: &paxosv1.PromiseResponse{Promised: true, AgentId: "peer-2"},
 			acceptResp:  &paxosv1.AcceptedResponse{Accepted: true, AgentId: "peer-2"},
 		},
@@ -118,15 +126,15 @@ func TestProposer_NoQuorum(t *testing.T) {
 
 	agentID := "proposer-agent"
 	acceptor := NewAcceptor(agentID, store)
-	
+
 	// Peers return failure or no promise
 	peers := []PeerClient{
 		&mockPeer{
-			agentID: "peer-1",
+			agentID:     "peer-1",
 			prepareResp: &paxosv1.PromiseResponse{Promised: false, AgentId: "peer-1"},
 		},
 		&mockPeer{
-			agentID: "peer-2",
+			agentID:     "peer-2",
 			prepareResp: &paxosv1.PromiseResponse{Promised: false, AgentId: "peer-2"},
 		},
 	}

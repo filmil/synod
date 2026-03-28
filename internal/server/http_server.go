@@ -210,19 +210,27 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(ids)
 
+	ephemeral := s.cell.GetEphemeralPeers()
+
 	for _, id := range ids {
 		label := id
 		if id == agentID {
 			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", id)
 		}
 		info := members[id]
+		eph := ephemeral[id]
+
 		httpLink := ""
-		if info.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
+		if eph.HTTPURL != "" {
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", eph.HTTPURL, eph.HTTPURL)
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
-		fmt.Fprintf(w, "<tr><td><small>%s</small></td><td>%s</td><td><code>%s</code></td><td>%s</td></tr>", label, info.ShortName, info.GRPCAddr, httpLink)
+		grpcAddr := eph.GRPCAddr
+		if grpcAddr == "" {
+			grpcAddr = "unknown"
+		}
+		fmt.Fprintf(w, "<tr><td><small>%s</small></td><td>%s</td><td><code>%s</code></td><td>%s</td></tr>", label, info.ShortName, grpcAddr, httpLink)
 	}
 
 	fmt.Fprintf(w, `
@@ -297,16 +305,23 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(ids)
 
+	ephemeral := s.cell.GetEphemeralPeers()
+
 	for _, id := range ids {
 		info := members[id]
+		eph := ephemeral[id]
 		label := info.ShortName
 		if id == agentID {
 			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", label)
 		}
 
-		endpoints := fmt.Sprintf("<code>%s</code>", info.GRPCAddr)
-		if info.HTTPURL != "" {
-			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
+		grpcAddr := eph.GRPCAddr
+		if grpcAddr == "" {
+			grpcAddr = "unknown"
+		}
+		endpoints := fmt.Sprintf("<code>%s</code>", grpcAddr)
+		if eph.HTTPURL != "" {
+			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", eph.HTTPURL, eph.HTTPURL)
 		}
 
 		fmt.Fprintf(w, `
@@ -412,12 +427,21 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(ids)
 
+	ephemeral := s.cell.GetEphemeralPeers()
+
 	for _, id := range ids {
 		info := members[id]
-		grpcURL := fmt.Sprintf("grpc://%s", info.GRPCAddr)
+		eph := ephemeral[id]
+
+		grpcAddr := eph.GRPCAddr
+		if grpcAddr == "" {
+			grpcAddr = "unknown"
+		}
+		grpcURL := fmt.Sprintf("grpc://%s", grpcAddr)
+
 		httpLink := ""
-		if info.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
+		if eph.HTTPURL != "" {
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", eph.HTTPURL, eph.HTTPURL)
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
@@ -549,13 +573,13 @@ func renderJSONNode(node interface{}) string {
 		}
 		var sb strings.Builder
 		sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
-		
+
 		var keys []string
 		for k := range v {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		
+
 		for _, key := range keys {
 			val := v[key]
 			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(key), renderJSONNode(val)))

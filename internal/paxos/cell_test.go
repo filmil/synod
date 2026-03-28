@@ -25,12 +25,12 @@ func TestCell_ProposeRemoval(t *testing.T) {
 
 	agentID := "agent-1"
 	acceptor := NewAcceptor(agentID, store)
-	
+
 	// Pre-populate membership
 	peerID := "peer-to-remove"
-	peerInfo := state.PeerInfo{GRPCAddr: "localhost:1234", ShortName: "Peer"}
+	peerInfo := state.PeerInfo{ShortName: "Peer"}
 	peersMap := map[string]state.PeerInfo{
-		agentID: {GRPCAddr: "localhost:50051", ShortName: "Self"},
+		agentID: {ShortName: "Self"},
 		peerID:  peerInfo,
 	}
 	peersData, _ := json.Marshal(peersMap)
@@ -44,7 +44,10 @@ func TestCell_ProposeRemoval(t *testing.T) {
 		t.Fatalf("failed to add peer to membership: %v", err)
 	}
 
-	cell := NewCell(agentID, store, acceptor, nil)
+	cell := NewCell(agentID, store, acceptor, nil, "localhost:50051", "http://localhost:8080")
+	// Also need the peer to be in ephemeral map so refreshPeers includes it
+	cell.UpdateEphemeralPeer(peerID, "localhost:1234", "")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -92,11 +95,11 @@ func TestCell_PingPeers(t *testing.T) {
 	// Pre-populate membership with a responsive and an unresponsive peer
 	peer1ID := "responsive-peer"
 	peer2ID := "unresponsive-peer"
-	
+
 	peersMap := map[string]state.PeerInfo{
-		agentID: {GRPCAddr: "localhost:50051", ShortName: "Self"},
-		peer1ID: {GRPCAddr: "localhost:1111", ShortName: "Peer1"},
-		peer2ID: {GRPCAddr: "localhost:2222", ShortName: "Peer2"},
+		agentID: {ShortName: "Self"},
+		peer1ID: {ShortName: "Peer1"},
+		peer2ID: {ShortName: "Peer2"},
 	}
 	peersData, _ := json.Marshal(peersMap)
 	store.CommitKV("/_internal/peers", peersData, "membership", 1)
@@ -123,15 +126,11 @@ func TestCell_PingPeers(t *testing.T) {
 		return nil, nil
 	}
 
-	cell := NewCell(agentID, store, acceptor, factory)
-	
-	// Mock peers for proposer quorum (agent-1 and responsive-peer should make quorum of 2 out of 3)
-	// Actually we need to set the peers in the cell so the proposer knows about them.
-	// But refreshPeers will do that.
-	
-	// We need to mock the proposer's behavior because ProposeRemoval uses p.proposer.Propose
-	// ProposeRemoval uses p.proposer, which is set by refreshPeers.
-	
+	cell := NewCell(agentID, store, acceptor, factory, "localhost:50051", "http://localhost:8080")
+	// Populate ephemeral map
+	cell.UpdateEphemeralPeer(peer1ID, "localhost:1111", "")
+	cell.UpdateEphemeralPeer(peer2ID, "localhost:2222", "")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

@@ -7,8 +7,8 @@ import (
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
-	"google.golang.org/grpc"
 	"github.com/golang/glog"
+	"google.golang.org/grpc"
 )
 
 type PaxosServer struct {
@@ -38,9 +38,10 @@ func (s *PaxosServer) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*
 
 func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error) {
 	glog.Infof("gRPC: Received JoinCluster from %s at %s", req.AgentId, req.HostPort)
+	// Update ephemeral map
+	s.cell.UpdateEphemeralPeer(req.AgentId, req.HostPort, req.HttpUrl)
+
 	info := state.PeerInfo{
-		GRPCAddr:  req.HostPort,
-		HTTPURL:   req.HttpUrl,
 		ShortName: req.ShortName,
 	}
 	err := s.cell.ProposeMembership(ctx, req.AgentId, info)
@@ -60,6 +61,9 @@ func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterR
 }
 
 func (s *PaxosServer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error) {
+	// Update ephemeral map
+	s.cell.UpdateEphemeralPeer(req.AgentId, req.HostPort, req.HttpUrl)
+
 	keys, err := s.cell.GetSyncState()
 	if err != nil {
 		glog.Errorf("gRPC Sync failed to get sync state: %v", err)
@@ -84,9 +88,17 @@ func (s *PaxosServer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryReq
 }
 
 func (s *PaxosServer) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error) {
+	// Update ephemeral map
+	s.cell.UpdateEphemeralPeer(req.AgentId, req.HostPort, req.HttpUrl)
+
+	// Get our own ephemeral info (set in main.go)
+	eph, _ := s.cell.GetEphemeralPeer(s.agentID)
+
 	return &paxosv1.PingResponse{
-		AgentId: s.agentID,
-		Nonce:   req.Nonce,
+		AgentId:  s.agentID,
+		Nonce:    req.Nonce,
+		HostPort: eph.GRPCAddr,
+		HttpUrl:  eph.HTTPURL,
 	}, nil
 }
 

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/golang/glog"
 	"github.com/filmil/synod/internal/state"
-	"google.golang.org/protobuf/encoding/prototext"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
+	"github.com/golang/glog"
+	"google.golang.org/protobuf/encoding/prototext"
 )
 
 type Acceptor struct {
@@ -28,7 +28,7 @@ func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*p
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	glog.Infof("Acceptor(%s): Prepare request from %s for key %s, proposal %v, nonce %s", 
+	glog.Infof("Acceptor(%s): Prepare request from %s for key %s, proposal %v, nonce %s",
 		a.agentID, req.AgentId, req.Key, req.ProposalId, req.Nonce)
 
 	promisedID, acceptedID, acceptedValue, err := a.store.GetAcceptorState(req.Key)
@@ -43,13 +43,13 @@ func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*p
 			return nil, fmt.Errorf("failed to set promised ID: %w", err)
 		}
 		resp = &paxosv1.PromiseResponse{
-			AgentId:             a.agentID,
-			Promised:            true,
-			HighestAcceptedId:   acceptedID,
+			AgentId:              a.agentID,
+			Promised:             true,
+			HighestAcceptedId:    acceptedID,
 			HighestAcceptedValue: acceptedValue,
 		}
 	} else {
-		glog.Warningf("Acceptor(%s): Rejected Prepare for key %s: proposal %v <= promised %v", 
+		glog.Warningf("Acceptor(%s): Rejected Prepare for key %s: proposal %v <= promised %v",
 			a.agentID, req.Key, req.ProposalId, promisedID)
 		resp = &paxosv1.PromiseResponse{
 			AgentId:  a.agentID,
@@ -71,7 +71,7 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	glog.Infof("Acceptor(%s): Accept request from %s for key %s, proposal %v, nonce %s", 
+	glog.Infof("Acceptor(%s): Accept request from %s for key %s, proposal %v, nonce %s",
 		a.agentID, req.AgentId, req.Key, req.ProposalId, req.Nonce)
 
 	promisedID, _, _, err := a.store.GetAcceptorState(req.Key)
@@ -91,7 +91,7 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 			Accepted: true,
 		}
 	} else {
-		glog.Warningf("Acceptor(%s): Rejected Accept for key %s: proposal %v < promised %v", 
+		glog.Warningf("Acceptor(%s): Rejected Accept for key %s: proposal %v < promised %v",
 			a.agentID, req.Key, req.ProposalId, promisedID)
 		resp = &paxosv1.AcceptedResponse{
 			AgentId:  a.agentID,

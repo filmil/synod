@@ -73,7 +73,7 @@ func main() {
 	}
 
 	acceptor := paxos.NewAcceptor(agentID, store)
-	cell := paxos.NewCell(agentID, store, acceptor, peerFactory)
+	cell := paxos.NewCell(agentID, store, acceptor, peerFactory, finalGrpcAddr, fmt.Sprintf("http://%s", httpLis.Addr().String()))
 	paxosSrv := server.NewPaxosServer(agentID, store, acceptor, cell)
 
 	var existingPeers map[string]state.PeerInfo
@@ -121,8 +121,6 @@ func main() {
 	glog.Infof("Starting Synod agent with ID: %s, Name: %s", agentID, shortName)
 
 	selfInfo := state.PeerInfo{
-		GRPCAddr:  finalGrpcAddr,
-		HTTPURL:   fmt.Sprintf("http://%s", httpLis.Addr().String()),
 		ShortName: shortName,
 	}
 	if err := store.AddMember(agentID, selfInfo); err != nil {
@@ -146,7 +144,7 @@ func main() {
 					AgentId:   agentID,
 					HostPort:  finalGrpcAddr,
 					ShortName: shortName,
-					HttpUrl:   selfInfo.HTTPURL,
+					HttpUrl:   fmt.Sprintf("http://%s", httpLis.Addr().String()),
 				})
 
 				if err != nil {
@@ -171,9 +169,11 @@ func main() {
 			}
 
 			if joinedAgentID != "" {
-				if err := store.AddMember(joinedAgentID, state.PeerInfo{GRPCAddr: *peerAddr, ShortName: "Unknown"}); err != nil {
+				if err := store.AddMember(joinedAgentID, state.PeerInfo{ShortName: "Unknown"}); err != nil {
 					glog.Errorf("Failed to add join peer to membership: %v", err)
 				}
+				// Also add the join peer to ephemeral map so we can talk to it
+				cell.UpdateEphemeralPeer(joinedAgentID, *peerAddr, "")
 
 				// Download the consensus value of the list of peers
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
