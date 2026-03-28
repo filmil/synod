@@ -549,7 +549,15 @@ func renderJSONNode(node interface{}) string {
 		}
 		var sb strings.Builder
 		sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
-		for key, val := range v {
+		
+		var keys []string
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		
+		for _, key := range keys {
+			val := v[key]
 			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(key), renderJSONNode(val)))
 		}
 		sb.WriteString(`</tbody></table>`)
@@ -578,67 +586,113 @@ func renderJSONNode(node interface{}) string {
 	}
 }
 
-// prototextToTable parses a simple Protobuf text format string into a hierarchical HTML table.
-func prototextToTable(text string) string {
-	if len(text) == 0 {
-		return ""
-	}
+// ptField represents a node in a parsed Protobuf TextFormat AST.
+type ptField struct {
+	Key      string
+	Val      string
+	IsBlock  bool
+	Children []*ptField
+}
 
-	lines := strings.Split(strings.TrimSpace(text), "\n")
-	var sb strings.Builder
-	sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+func parsePT(lines []string, start int) ([]*ptField, int) {
+	var fields []*ptField
+	i := start
+	for i < len(lines) {
+		line := strings.TrimSpace(lines[i])
 		if line == "" {
+			i++
 			continue
 		}
-
 		if line == "}" {
-			sb.WriteString(`</tbody></table></td></tr>`)
-			continue
+			i++
+			return fields, i
 		}
-
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) == 1 {
-			// Possibly an opening block: "key {"
 			if strings.HasSuffix(line, "{") {
 				key := strings.TrimSpace(strings.TrimSuffix(line, "{"))
-				sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td><table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%%;"><tbody>`, html.EscapeString(key)))
+				var children []*ptField
+				children, i = parsePT(lines, i+1)
+				fields = append(fields, &ptField{Key: key, IsBlock: true, Children: children})
 			} else {
-				sb.WriteString(fmt.Sprintf(`<tr><td colspan="2">%s</td></tr>`, html.EscapeString(line)))
+				fields = append(fields, &ptField{Key: "", Val: line})
+				i++
 			}
 		} else {
 			key := strings.TrimSpace(parts[0])
 			val := strings.TrimSpace(parts[1])
-
 			if strings.HasSuffix(val, "{") {
 				key2 := strings.TrimSpace(strings.TrimSuffix(val, "{"))
 				if key2 != "" {
 					key = key + " " + key2
 				}
-				sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td><table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%%;"><tbody>`, html.EscapeString(key)))
+				var children []*ptField
+				children, i = parsePT(lines, i+1)
+				fields = append(fields, &ptField{Key: key, IsBlock: true, Children: children})
 			} else {
-				// Specifically attempt to decode "value" as JSON, as requested
-				if key == "value" {
-					if unquoted, err := strconv.Unquote(val); err == nil {
-						var obj interface{}
-						if err := json.Unmarshal([]byte(unquoted), &obj); err == nil {
-							sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(key), renderJSONNode(obj)))
-							continue
-						}
-					}
-				}
-
-				// Remove quotes
-				if strings.HasPrefix(val, `"`) && strings.HasSuffix(val, `"`) {
-					val = val[1 : len(val)-1]
-				}
-				sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(key), html.EscapeString(val)))
+				fields = append(fields, &ptField{Key: key, Val: val})
+				i++
 			}
 		}
 	}
+	return fields, i
+}
 
+func sortPTFields(fields []*ptField) {
+	sort.SliceStable(fields, func(i, j int) bool {
+		return fields[i].Key < fields[j].Key
+	})
+	for _, f := range fields {
+		if f.IsBlock {
+			sortPTFields(f.Children)
+		}
+	}
+}
+
+func renderPTFields(fields []*ptField) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
+	for _, f := range fields {
+		if f.Key == "" {
+			sb.WriteString(fmt.Sprintf(`<tr><td colspan="2">%s</td></tr>`, html.EscapeString(f.Val)))
+			continue
+		}
+		if f.IsBlock {
+			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(f.Key), renderPTFields(f.Children)))
+		} else {
+			// Decode embedded JSON on the 'value' field exclusively
+			if f.Key == "value" {
+				if unquoted, err := strconv.Unquote(f.Val); err == nil {
+					var obj interface{}
+					if err := json.Unmarshal([]byte(unquoted), &obj); err == nil {
+						sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(f.Key), renderJSONNode(obj)))
+						continue
+					}
+				}
+			}
+			val := f.Val
+			if strings.HasPrefix(val, `"`) && strings.HasSuffix(val, `"`) {
+				val = val[1 : len(val)-1]
+			}
+			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(f.Key), html.EscapeString(val)))
+		}
+	}
 	sb.WriteString(`</tbody></table>`)
 	return sb.String()
+}
+
+// prototextToTable parses a simple Protobuf text format string into a hierarchical HTML table.
+// It explicitly parses the AST structure, orders all fields lexicographically,
+// and maps embedded JSON 'value' payloads into tables recursively.
+func prototextToTable(text string) string {
+	if len(text) == 0 {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	fields, _ := parsePT(lines, 0)
+	sortPTFields(fields)
+	return renderPTFields(fields)
 }
