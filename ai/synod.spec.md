@@ -15,6 +15,8 @@
 * Enforce that when go GRPC library is used, the repo name is `grpc`.
 * Use `bazel mod tidy` to update module versions in bazel.
 * Use `bazel run @rules_go//go -- <args>` to run the go binary, do not use `go` directly.
+* Use `bazel run //:gazelle` to update go build rules for new dependencies and
+  otherwise.
 * Use at least protobuf version 34.0, never downgrade.
 * If you need to write temporary files you can use the dir `local`. Prefer to
   create files in a subdirectory of `local` keyed by this session's ID.
@@ -23,7 +25,9 @@
 * Don't use `glog.Fatalf`, instead log at `glog.Errof` and call `os.Exit` instead.
 * Find and save LICENSE for all dirs in //third_party
 * Use "Conventional Commits 1.0.0" when creating commits.
-* When starting new work, create a new git branch.
+* When starting new work:
+  * create a new git branch.
+  * Git pull from main to ensure you are reasonably up to date.
 
 ### Update P.1
 
@@ -91,10 +95,19 @@
 #### Update I.1: short names
 
 * For each peer, adopt an identity which is a short human name.
-  * Download 1000 names, roughly half male, half female to pick.
+  * Download 1000 names, roughly half male, half female to pick, for each letter
+    of the alphabet.
   * Associate each UUID with a short cell-unique human name picked initially at
     random from the list, and use that name in all dashboards.
   * If name proposal is rejected, select a new name, and retry.
+
+#### Update I.2: more names
+
+  * Download 1000 names, roughly half male, half female to pick, for each letter
+    of the alphabet.
+  * Make a unified list of these names, select names uniformly at random.
+    Prefer names starting with "A" for first peer in the cell, names starting
+    with "B" for second etc.
 
 ### Dynamic consensus
 
@@ -112,6 +125,15 @@
   * all currently present agents must agree to admit the new agent.
     * Once that is done, the agent is admitted and can take part in decisions.
       Else, that agent will be ignored.
+
+
+#### Update C.1:
+
+* Periodically (flag-configurable, default 2 minutes) ping all peers to figure
+  out if they are there.
+  * Add a "ping" gRPC API endpoint for this.
+  * For peers that are no longer responding, send a proposal to remove from
+    `/_internal/peers`.
 
 
 ### Testing
