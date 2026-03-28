@@ -19,11 +19,24 @@ service PaxosService {
 
   // Fetch a Key-Value entry.
   rpc GetKVEntry(GetKVEntryRequest) returns (GetKVEntryResponse) {}
+
+  // Ping an agent.
+  rpc Ping(PingRequest) returns (PingResponse) {}
 }
 
 message ProposalID {
   uint64 number = 1;
   string agent_id = 2;
+}
+
+message PingRequest {
+  string agent_id = 1;
+  string nonce = 2;
+}
+
+message PingResponse {
+  string agent_id = 1;
+  string nonce = 2;
 }
 
 message PrepareRequest {

@@ -88,7 +88,7 @@ func (p *Proposer) sendPrepare(ctx context.Context, key string, id *paxosv1.Prop
 
 	// Prepare self
 	resp, err := p.acceptor.Prepare(ctx, req)
-	if err == nil && resp.Promised {
+	if err == nil && resp != nil && resp.Promised {
 		results = append(results, resp)
 	}
 
@@ -101,7 +101,7 @@ func (p *Proposer) sendPrepare(ctx context.Context, key string, id *paxosv1.Prop
 				glog.V(2).Infof("Prepare failed for peer %s: %v", pc.AgentID(), err)
 				return
 			}
-			if resp.Promised {
+			if resp != nil && resp.Promised {
 				mu.Lock()
 				results = append(results, resp)
 				mu.Unlock()
@@ -127,7 +127,7 @@ func (p *Proposer) sendAccept(ctx context.Context, key string, id *paxosv1.Propo
 
 	// Accept self
 	resp, err := p.acceptor.Accept(ctx, req)
-	if err == nil && resp.Accepted {
+	if err == nil && resp != nil && resp.Accepted {
 		count++
 	}
 
@@ -140,7 +140,7 @@ func (p *Proposer) sendAccept(ctx context.Context, key string, id *paxosv1.Propo
 				glog.V(2).Infof("Accept failed for peer %s: %v", pc.AgentID(), err)
 				return
 			}
-			if resp.Accepted {
+			if resp != nil && resp.Accepted {
 				mu.Lock()
 				count++
 				mu.Unlock()

@@ -11,6 +11,7 @@ import (
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
+	"github.com/google/uuid"
 )
 
 type MembershipChange struct {
@@ -25,6 +26,7 @@ type PeerClient interface {
 	JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error)
 	Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error)
 	GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error)
+	Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error)
 	AgentID() string
 }
 
@@ -141,6 +143,57 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 	}
 }
 
+func (c *Cell) ProposeRemoval(ctx context.Context, agentID string) error {
+	key := "/_internal/peers"
+	for {
+		val, _, version, _, err := c.store.GetKVEntry(key)
+		if err != nil {
+			return fmt.Errorf("failed to get KV entry for peers: %w", err)
+		}
+		var peers map[string]state.PeerInfo
+		if val != nil {
+			if err := json.Unmarshal(val, &peers); err != nil {
+				glog.Errorf("Cell(%s): Failed to unmarshal peers map: %v", c.agentID, err)
+				peers = make(map[string]state.PeerInfo)
+			}
+		} else {
+			peers = make(map[string]state.PeerInfo)
+		}
+
+		// Check if already correct
+		if _, ok := peers[agentID]; !ok {
+			return nil
+		}
+
+		delete(peers, agentID)
+		newVal, err := json.Marshal(peers)
+		if err != nil {
+			return fmt.Errorf("failed to marshal membership removal: %w", err)
+		}
+
+		nextVersion := version + 1
+		instanceKey := fmt.Sprintf("%s@%d", key, nextVersion)
+
+		glog.Infof("Cell(%s): Proposing removal for %s", c.agentID, agentID)
+
+		chosenValue, err := c.proposer.Propose(ctx, instanceKey, newVal)
+		if err != nil {
+			return err
+		}
+
+		if err := c.store.CommitKV(key, chosenValue, "membership", nextVersion); err != nil {
+			return fmt.Errorf("failed to commit kv: %w", err)
+		}
+
+		c.ApplyMembershipChange(chosenValue)
+
+		if bytes.Equal(chosenValue, newVal) {
+			return nil
+		}
+		glog.Infof("Cell(%s): Membership at %s was updated concurrently, retrying...", c.agentID, instanceKey)
+	}
+}
+
 func (c *Cell) ApplyMembershipChange(value []byte) {
 	var peers map[string]state.PeerInfo
 	if err := json.Unmarshal(value, &peers); err != nil {
@@ -148,8 +201,27 @@ func (c *Cell) ApplyMembershipChange(value []byte) {
 		return
 	}
 
+	// Current membership in DB
+	currentMembers, err := c.store.GetMembers()
+	if err != nil {
+		glog.Errorf("Cell(%s): Failed to get current members from DB: %v", c.agentID, err)
+		return
+	}
+
+	// Delete members that are not in the new map
+	for id := range currentMembers {
+		if _, ok := peers[id]; !ok {
+			if err := c.store.RemoveMember(id); err != nil {
+				glog.Errorf("Cell(%s): Failed to remove member %s from DB: %v", c.agentID, id, err)
+			}
+		}
+	}
+
+	// Add/Update members
 	for id, info := range peers {
-		c.store.AddMember(id, info)
+		if err := c.store.AddMember(id, info); err != nil {
+			glog.Errorf("Cell(%s): Failed to add member %s to DB: %v", c.agentID, id, err)
+		}
 	}
 }
 
@@ -201,6 +273,50 @@ func (c *Cell) StartSyncLoop(ctx context.Context, interval time.Duration) {
 			}
 		}
 	}()
+}
+
+func (c *Cell) StartPingLoop(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				c.PingPeers(ctx)
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+}
+
+func (c *Cell) PingPeers(ctx context.Context) {
+	glog.V(2).Infof("Cell(%s): Pinging peers", c.agentID)
+	c.refreshPeers(ctx)
+
+	c.mu.Lock()
+	peers := make([]PeerClient, 0, len(c.peers))
+	for _, p := range c.peers {
+		peers = append(peers, p)
+	}
+	c.mu.Unlock()
+
+	for _, p := range peers {
+		nonce := uuid.New().String()
+		pingCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+		glog.V(2).Infof("Cell(%s): Pinging peer %s", c.agentID, p.AgentID())
+		_, err := p.Ping(pingCtx, &paxosv1.PingRequest{
+			AgentId: c.agentID,
+			Nonce:   nonce,
+		})
+		cancel()
+		if err != nil {
+			glog.Warningf("Cell(%s): Peer %s is not responding: %v. Proposing removal.", c.agentID, p.AgentID(), err)
+			if err := c.ProposeRemoval(ctx, p.AgentID()); err != nil {
+				glog.Errorf("Cell(%s): Failed to propose removal of peer %s: %v", c.agentID, p.AgentID(), err)
+			}
+		}
+	}
 }
 
 func (c *Cell) SyncWithPeers(ctx context.Context) {

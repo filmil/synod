@@ -21,6 +21,7 @@ var (
 	grpcAddr = flag.String("grpc_addr", ":50051", "gRPC address to listen on")
 	httpAddr = flag.String("http_addr", ":8080", "HTTP address to listen on")
 	peerAddr = flag.String("peer", "", "Address of an existing peer to join the cell")
+	pingInterval = flag.Duration("ping_interval", 2*time.Minute, "Interval to ping peers")
 )
 
 func main() {
@@ -158,11 +159,15 @@ func main() {
 	// Start sync loop
 	cell.StartSyncLoop(context.Background(), 5*time.Second)
 
+	// Start ping loop
+	cell.StartPingLoop(context.Background(), *pingInterval)
+
 	// Run servers
 	errChan := make(chan error, 2)
+	ctx := context.Background()
 
 	go func() {
-		errChan <- server.RunGRPCServer(grpcLis, paxosSrv)
+		errChan <- server.RunGRPCServer(ctx, grpcLis, paxosSrv)
 	}()
 
 	go func() {
