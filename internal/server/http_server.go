@@ -3,9 +3,11 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/bazelbuild/rules_go/go/runfiles"
 	"github.com/filmil/synod/internal/paxos"
@@ -34,7 +36,7 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	mux.HandleFunc("/peers", s.handlePeers)
 	mux.HandleFunc("/store", s.handleStore)
 	mux.HandleFunc("/api/command", s.handleCommand)
-	
+
 	// Serve locally saved bootstrap via runfiles
 	mux.HandleFunc("/static/bootstrap.min.css", func(w http.ResponseWriter, r *http.Request) {
 		path, err := runfiles.Rlocation("_main/third_party/bootstrap/bootstrap.min.css")
@@ -350,9 +352,9 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
                   <td><span class="badge bg-info text-dark">%s</span></td>
                   <td>%s</td>
                   <td>%s</td>
-                  <td><pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>%s</code></pre></td>
-                  <td><pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>%s</code></pre></td>
-                </tr>`, e.ID, e.Timestamp, e.Type, senderName, receiverName, e.Message, e.Reply)
+                  <td>%s</td>
+                  <td>%s</td>
+                </tr>`, e.ID, e.Timestamp, e.Type, senderName, receiverName, maybeJSONToTable([]byte(e.Message)), maybeJSONToTable([]byte(e.Reply)))
 	}
 
 	fmt.Fprintf(w, `
@@ -469,10 +471,10 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `
                 <tr>
                   <td><code>%s</code></td>
-                  <td><code>%s</code></td>
+                  <td>%s</td>
                   <td>%s</td>
                   <td>%d</td>
-                </tr>`, kv.Key, string(kv.Value), kv.Type, kv.Version)
+                </tr>`, kv.Key, maybeJSONToTable(kv.Value), kv.Type, kv.Version)
 	}
 
 	fmt.Fprintf(w, `
@@ -519,4 +521,58 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
         <a href="/" class="btn btn-primary">Back to Status</a>
       </div>`, key, val)
 	s.renderFooter(w)
+}
+
+// maybeJSONToTable attempts to parse a string/byte slice as JSON.
+// If it's a valid JSON object or array, it renders it as a nested HTML table.
+// Otherwise, it returns the content wrapped in standard <pre><code> blocks.
+func maybeJSONToTable(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+
+	var obj interface{}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		// Not JSON, return as plain text
+		return fmt.Sprintf(`<pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>%s</code></pre>`, html.EscapeString(string(data)))
+	}
+
+	return renderJSONNode(obj)
+}
+
+func renderJSONNode(node interface{}) string {
+	switch v := node.(type) {
+	case map[string]interface{}:
+		if len(v) == 0 {
+			return "{}"
+		}
+		var sb strings.Builder
+		sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
+		for key, val := range v {
+			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(key), renderJSONNode(val)))
+		}
+		sb.WriteString(`</tbody></table>`)
+		return sb.String()
+	case []interface{}:
+		if len(v) == 0 {
+			return "[]"
+		}
+		var sb strings.Builder
+		sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
+		for i, val := range v {
+			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">[%d]</th><td>%s</td></tr>`, i, renderJSONNode(val)))
+		}
+		sb.WriteString(`</tbody></table>`)
+		return sb.String()
+	case string:
+		return html.EscapeString(v)
+	case float64:
+		return fmt.Sprintf("%v", v)
+	case bool:
+		return fmt.Sprintf("%t", v)
+	case nil:
+		return "<em>null</em>"
+	default:
+		return html.EscapeString(fmt.Sprintf("%v", v))
+	}
 }
