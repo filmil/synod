@@ -10,6 +10,7 @@ go_library(
     importpath = "github.com/filmil/synod/internal/paxos",
     visibility = ["//visibility:public"],
     deps = [
+        "//internal/backoff",
         "//internal/state",
         "//proto/paxos/v1:paxosv1_go_proto",
         "@com_github_golang_glog//:glog",

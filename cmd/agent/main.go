@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/filmil/synod/internal/backoff"
 	"github.com/filmil/synod/internal/names"
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/server"
@@ -133,30 +134,40 @@ func main() {
 	if *peerAddr != "" {
 		if joinClient != nil {
 			var joinedAgentID string
-			for {
+
+			bo := backoff.New()
+			bo.MaxElapsedTime = 2 * time.Minute
+
+			err := bo.Retry(context.Background(), "JoinCluster", func() error {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
 				resp, err := joinClient.JoinCluster(ctx, &paxosv1.JoinClusterRequest{
 					AgentId:   agentID,
 					HostPort:  finalGrpcAddr,
 					ShortName: shortName,
 					HttpUrl:   selfInfo.HTTPURL,
 				})
-				cancel()
 
 				if err != nil {
-					glog.Errorf("JoinCluster failed: %v", err)
-					break
-				} else if !resp.Success {
-					glog.Errorf("JoinCluster rejected: %s. Retrying with a new name...", resp.Message)
+					return fmt.Errorf("JoinCluster failed: %w", err)
+				}
+
+				if !resp.Success {
+					glog.Warningf("JoinCluster rejected: %s. Generating new name and retrying...", resp.Message)
 					shortName = names.GenerateForIndex(index)
 					selfInfo.ShortName = shortName
 					store.SetShortName(shortName)
-					continue
-				} else {
-					glog.Infof("Successfully joined cluster via %s", resp.AgentId)
-					joinedAgentID = resp.AgentId
-					break
+					return fmt.Errorf("JoinCluster rejected: %s", resp.Message) // Returns error to trigger backoff retry
 				}
+
+				glog.Infof("Successfully joined cluster via %s", resp.AgentId)
+				joinedAgentID = resp.AgentId
+				return nil
+			})
+
+			if err != nil {
+				glog.Errorf("Failed to join cluster after retries: %v", err)
 			}
 
 			if joinedAgentID != "" {

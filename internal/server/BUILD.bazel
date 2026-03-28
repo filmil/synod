@@ -12,6 +12,7 @@ go_library(
     importpath = "github.com/filmil/synod/internal/server",
     visibility = ["//visibility:public"],
     deps = [
+        "//internal/backoff",
         "//internal/paxos",
         "//internal/state",
         "//proto/paxos/v1:paxosv1_go_proto",
