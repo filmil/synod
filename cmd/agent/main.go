@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/filmil/synod/internal/names"
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/server"
 	"github.com/filmil/synod/internal/state"
@@ -43,12 +45,21 @@ func main() {
 	}
 	defer store.Close()
 
-	agentID, err := store.GetAgentID()
+	agentID, shortName, err := store.GetAgentID()
 	if err != nil {
 		glog.Errorf("Failed to get agent ID: %v", err)
 		os.Exit(1)
 	}
-	glog.Infof("Starting Synod agent with ID: %s", agentID)
+
+	// If the node has no short name, generate one now.
+	if shortName == "PendingName" || shortName == "" {
+		shortName = names.Generate()
+		if err := store.SetShortName(shortName); err != nil {
+			glog.Errorf("Failed to set new short name: %v", err)
+		}
+	}
+
+	glog.Infof("Starting Synod agent with ID: %s, Name: %s", agentID, shortName)
 
 	// Create listeners with retry logic
 	grpcLis, err := server.ListenWithRetry(*grpcAddr)
@@ -118,13 +129,21 @@ func main() {
 					}
 					cell.ApplyMembershipChange(kvResp.Value)
 				}
+				
+				// After joining and getting the latest map, we must propose *ourselves* to the map!
+				glog.Infof("Proposing newly joined node self to /_internal/peers")
+				peerValue := fmt.Sprintf("%s (%s)", finalGrpcAddr, shortName)
+				if err := cell.ProposeMembership(context.Background(), agentID, peerValue); err != nil {
+					glog.Errorf("Failed to add self to membership after joining: %v", err)
+				}
 			}
 			client.Close()
 		}
 	} else {
 		// Bootstrap node: propose ourselves to the KV store
 		glog.Infof("Bootstrapping new cluster, proposing self to /_internal/peers")
-		if err := cell.ProposeMembership(context.Background(), agentID, finalGrpcAddr); err != nil {
+		peerValue := fmt.Sprintf("%s (%s)", finalGrpcAddr, shortName)
+		if err := cell.ProposeMembership(context.Background(), agentID, peerValue); err != nil {
 			glog.Errorf("Failed to bootstrap membership: %v", err)
 			os.Exit(1)
 		}

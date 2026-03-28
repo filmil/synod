@@ -66,7 +66,7 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 }
 
 func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	agentID, err := s.store.GetAgentID()
+	agentID, shortName, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
@@ -103,7 +103,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
   <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
       <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Synod Paxos Agent</span>
+        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: %s</span>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
           <span class="navbar-toggler-icon"></span>
         </button>
@@ -124,6 +124,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
             <div class="card-header bg-primary text-white">Agent Info</div>
             <div class="card-body">
               <p class="card-text"><strong>ID:</strong> <small class="text-muted">%s</small></p>
+              <p class="card-text"><strong>Name:</strong> %s</p>
               <p class="card-text"><strong>Keys Count:</strong> %d</p>
             </div>
           </div>
@@ -135,9 +136,9 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
               <div class="table-responsive">
                 <table class="table table-hover">
                   <thead>
-                    <tr><th>Agent ID</th><th>Address</th></tr>
+                    <tr><th>Agent ID</th><th>Address & Name</th></tr>
                   </thead>
-                  <tbody>`, agentID, agentID, len(kvs))
+                  <tbody>`, shortName, shortName, agentID, shortName, len(kvs))
 
 	var ids []string
 	for id := range members {
@@ -185,7 +186,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
-	agentID, err := s.store.GetAgentID()
+	_, shortName, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
@@ -209,7 +210,7 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
   <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
       <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Synod Paxos Agent</span>
+        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: %s</span>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
           <span class="navbar-toggler-icon"></span>
         </button>
@@ -234,7 +235,7 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
                   <th>ID</th><th>Time</th><th>Type</th><th>Sender</th><th>Receiver</th><th>Request</th><th>Reply</th>
                 </tr>
               </thead>
-              <tbody>`, agentID)
+              <tbody>`, shortName, shortName)
 
 	for _, e := range entries {
 		fmt.Fprintf(w, `
@@ -262,7 +263,7 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
-	agentID, err := s.store.GetAgentID()
+	agentID, shortName, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
@@ -294,7 +295,7 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
   <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
       <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Synod Paxos Agent</span>
+        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: %s</span>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
           <span class="navbar-toggler-icon"></span>
         </button>
@@ -317,10 +318,10 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
               <thead>
                 <tr>
                   <th>Agent ID</th>
-                  <th>gRPC URL Endpoint</th>
+                  <th>Address & Name</th>
                 </tr>
               </thead>
-              <tbody>`, agentID)
+              <tbody>`, shortName, shortName)
 
 	var ids []string
 	for id := range members {
@@ -332,12 +333,11 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 
 	for _, id := range ids {
 		addr := members[id]
-		urlEndpoint := fmt.Sprintf("grpc://%s", addr)
 		fmt.Fprintf(w, `
                 <tr>
                   <td><code>%s</code></td>
-                  <td><a href="%s" class="text-decoration-none">%s</a></td>
-                </tr>`, id, urlEndpoint, urlEndpoint)
+                  <td>%s</td>
+                </tr>`, id, addr)
 	}
 
 	fmt.Fprintf(w, `
@@ -353,7 +353,7 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
-	agentID, err := s.store.GetAgentID()
+	_, shortName, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
@@ -377,7 +377,7 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
   <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
       <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Synod Paxos Agent</span>
+        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: %s</span>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
           <span class="navbar-toggler-icon"></span>
         </button>
@@ -405,7 +405,7 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
                   <th>Version</th>
                 </tr>
               </thead>
-              <tbody>`, agentID)
+              <tbody>`, shortName, shortName)
 
 	for _, kv := range kvs {
 		fmt.Fprintf(w, `

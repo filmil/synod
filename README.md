@@ -8,8 +8,11 @@ Synod is a distributed Paxos coordination agent implemented in Go, managing a sy
 - **Key-Value Store:** Implements standard Paxos consensus bound to unix-path keys (e.g. `/system/config`).
 - **Persistence:** SQLite backed via `mattn/go-sqlite3`.
 - **Dynamic Membership:** Nodes can dynamically join the cluster via gRPC. Network membership itself is managed within the KV Store under the `/_internal/peers` key using optimistic concurrency/versioning.
+- **Identities & Short Names:** Agents are assigned a unique UUID alongside a randomly selected human-readable short name for easier identification in dashboards.
+- **Dynamic Port Selection:** If a requested gRPC or HTTP port is unavailable, the agent automatically attempts to find and bind to a free port.
 - **Sync:** Nodes continuously synchronize their KV store versions in the background, recovering any missing keys or resolving out-of-date versions.
 - **Web UI:** Includes a simple embedded HTTP dashboard (styled with Bootstrap) to inspect the node's local view of participants (always includes itself), read the raw Key-Value Store, examine the pretty-printed RPC message log, and issue custom data proposals.
+- **Graceful Error Handling:** Top-level application errors safely abort the process with a clean exit code rather than crashing with panic traces.
 
 ## Running the Agent
 
