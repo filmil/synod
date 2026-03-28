@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -45,8 +44,14 @@ func main() {
 	}
 	glog.Infof("Starting Synod agent with ID: %s", agentID)
 
-	acceptor := paxos.NewAcceptor(store)
-	paxosSrv := server.NewPaxosServer(store, acceptor)
+	// Ensure self is in membership
+	if err := store.AddMember(agentID, *grpcAddr); err != nil {
+		glog.Fatalf("Failed to add self to membership: %v", err)
+	}
+
+	acceptor := paxos.NewAcceptor(agentID, store)
+	cell := paxos.NewCell(agentID, store, acceptor)
+	paxosSrv := server.NewPaxosServer(agentID, store, acceptor, cell)
 
 	// In a real implementation, we would manage peers dynamically.
 	// For now, if a peer is provided, we add it.
@@ -59,9 +64,7 @@ func main() {
 			peers = append(peers, peerClient)
 		}
 	}
-
-	// proposer := paxos.NewProposer(agentID, peers)
-	// _ = proposer
+	cell.SetPeers(peers)
 
 	// Run servers
 	errChan := make(chan error, 2)
@@ -71,7 +74,7 @@ func main() {
 	}()
 
 	go func() {
-		httpSrv := server.NewHTTPServer(*httpAddr, store)
+		httpSrv := server.NewHTTPServer(*httpAddr, store, cell)
 		errChan <- httpSrv.Run()
 	}()
 
