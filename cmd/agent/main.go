@@ -8,19 +8,19 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/filmil/synod/internal/names"
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/server"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
+	"github.com/golang/glog"
 )
 
 var (
-	stateDir = flag.String("state_dir", "", "Directory for state files (required)")
-	grpcAddr = flag.String("grpc_addr", ":50051", "gRPC address to listen on")
-	httpAddr = flag.String("http_addr", ":8080", "HTTP address to listen on")
-	peerAddr = flag.String("peer", "", "Address of an existing peer to join the cell")
+	stateDir     = flag.String("state_dir", "", "Directory for state files (required)")
+	grpcAddr     = flag.String("grpc_addr", ":50051", "gRPC address to listen on")
+	httpAddr     = flag.String("http_addr", ":8080", "HTTP address to listen on")
+	peerAddr     = flag.String("peer", "", "Address of an existing peer to join the cell")
 	pingInterval = flag.Duration("ping_interval", 2*time.Minute, "Interval to ping peers")
 )
 
@@ -122,7 +122,7 @@ func main() {
 				if err := store.AddMember(resp.AgentId, state.PeerInfo{GRPCAddr: *peerAddr, ShortName: "Unknown"}); err != nil {
 					glog.Errorf("Failed to add join peer to membership: %v", err)
 				}
-				
+
 				// Download the consensus value of the list of peers
 				ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 				kvResp, err := client.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
@@ -138,7 +138,7 @@ func main() {
 					}
 					cell.ApplyMembershipChange(kvResp.Value)
 				}
-				
+
 				// After joining and getting the latest map, we must propose *ourselves* to the map!
 				glog.Infof("Proposing newly joined node self to /_internal/peers")
 				if err := cell.ProposeMembership(context.Background(), agentID, selfInfo); err != nil {
@@ -176,7 +176,7 @@ func main() {
 	}()
 
 	glog.Infof("Synod agent is up and running")
-	
+
 	if err := <-errChan; err != nil {
 		glog.Errorf("Server error: %v", err)
 		os.Exit(1)
