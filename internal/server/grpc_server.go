@@ -38,7 +38,12 @@ func (s *PaxosServer) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*
 
 func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error) {
 	glog.Infof("gRPC: Received JoinCluster from %s at %s", req.AgentId, req.HostPort)
-	err := s.cell.ProposeMembership(ctx, req.AgentId, req.HostPort)
+	info := state.PeerInfo{
+		GRPCAddr:  req.HostPort,
+		HTTPURL:   req.HttpUrl,
+		ShortName: req.ShortName,
+	}
+	err := s.cell.ProposeMembership(ctx, req.AgentId, info)
 	if err != nil {
 		glog.Errorf("gRPC: JoinCluster failed: %v", err)
 		return &paxosv1.JoinClusterResponse{

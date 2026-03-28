@@ -32,13 +32,19 @@ func TestIntegration_5Agents(t *testing.T) {
 	agents[0] = newAgentInstance(t, "agent-0", tmpDir0, addr0)
 	go agents[0].run()
 
+	info0 := state.PeerInfo{
+		GRPCAddr:  addr0,
+		HTTPURL:   "",
+		ShortName: "agent-0-name",
+	}
+
 	// Ensure self is in membership for agent-0
-	if err := agents[0].store.AddMember("agent-0", addr0); err != nil {
+	if err := agents[0].store.AddMember("agent-0", info0); err != nil {
 		t.Fatalf("failed to add member: %v", err)
 	}
 
 	// Bootstrap agent-0's KV store with itself
-	if err := agents[0].cell.ProposeMembership(context.Background(), "agent-0", addr0); err != nil {
+	if err := agents[0].cell.ProposeMembership(context.Background(), "agent-0", info0); err != nil {
 		t.Fatalf("failed to bootstrap membership for agent-0: %v", err)
 	}
 
@@ -52,8 +58,15 @@ func TestIntegration_5Agents(t *testing.T) {
 
 		addr := fmt.Sprintf("127.0.0.1:%d", 50100+i)
 		agents[i] = newAgentInstance(t, fmt.Sprintf("agent-%d", i), tmpDir, addr)
+		
+		infoI := state.PeerInfo{
+			GRPCAddr:  addr,
+			HTTPURL:   "",
+			ShortName: fmt.Sprintf("agent-%d-name", i),
+		}
+
 		// Ensure self is in membership
-		if err := agents[i].store.AddMember(agents[i].id, addr); err != nil {
+		if err := agents[i].store.AddMember(agents[i].id, infoI); err != nil {
 			t.Fatalf("failed to add member: %v", err)
 		}
 		go agents[i].run()
@@ -66,8 +79,10 @@ func TestIntegration_5Agents(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		resp, err := client.JoinCluster(ctx, &paxosv1.JoinClusterRequest{
-			AgentId:  agents[i].id,
-			HostPort: addr,
+			AgentId:   agents[i].id,
+			HostPort:  addr,
+			ShortName: infoI.ShortName,
+			HttpUrl:   infoI.HTTPURL,
 		})
 		cancel()
 		if err != nil {
@@ -77,7 +92,7 @@ func TestIntegration_5Agents(t *testing.T) {
 			t.Fatalf("JoinCluster rejected for agent-%d: %s", i, resp.Message)
 		}
 		// Add agent-0 to local membership so we can sync
-		if err := agents[i].store.AddMember(resp.AgentId, addr0); err != nil {
+		if err := agents[i].store.AddMember(resp.AgentId, info0); err != nil {
 			t.Fatalf("Failed to add join peer to membership for agent-%d: %v", i, err)
 		}
 

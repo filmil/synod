@@ -77,7 +77,12 @@ func main() {
 	// finalHttpAddr := httpLis.Addr().String() // Not strictly needed for paxos consensus but good to know
 
 	// Ensure self is in membership with the ACTUAL port we are listening on
-	if err := store.AddMember(agentID, finalGrpcAddr); err != nil {
+	selfInfo := state.PeerInfo{
+		GRPCAddr:  finalGrpcAddr,
+		HTTPURL:   fmt.Sprintf("http://%s", httpLis.Addr().String()),
+		ShortName: shortName,
+	}
+	if err := store.AddMember(agentID, selfInfo); err != nil {
 		glog.Errorf("Failed to add self to membership: %v", err)
 		os.Exit(1)
 	}
@@ -99,8 +104,10 @@ func main() {
 		} else {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			resp, err := client.JoinCluster(ctx, &paxosv1.JoinClusterRequest{
-				AgentId:  agentID,
-				HostPort: finalGrpcAddr,
+				AgentId:   agentID,
+				HostPort:  finalGrpcAddr,
+				ShortName: shortName,
+				HttpUrl:   selfInfo.HTTPURL,
 			})
 			cancel()
 			if err != nil {
@@ -109,8 +116,9 @@ func main() {
 				glog.Errorf("JoinCluster rejected: %s", resp.Message)
 			} else {
 				glog.Infof("Successfully joined cluster via %s", resp.AgentId)
-				// Add the peer we joined to membership so we can sync
-				if err := store.AddMember(resp.AgentId, *peerAddr); err != nil {
+				// Add the peer we joined to membership so we can sync. Since we don't have its full info, we store a stub.
+				// It will be overwritten by the KV consensus download immediately after.
+				if err := store.AddMember(resp.AgentId, state.PeerInfo{GRPCAddr: *peerAddr, ShortName: "Unknown"}); err != nil {
 					glog.Errorf("Failed to add join peer to membership: %v", err)
 				}
 				
@@ -132,8 +140,7 @@ func main() {
 				
 				// After joining and getting the latest map, we must propose *ourselves* to the map!
 				glog.Infof("Proposing newly joined node self to /_internal/peers")
-				peerValue := fmt.Sprintf("%s (%s)", finalGrpcAddr, shortName)
-				if err := cell.ProposeMembership(context.Background(), agentID, peerValue); err != nil {
+				if err := cell.ProposeMembership(context.Background(), agentID, selfInfo); err != nil {
 					glog.Errorf("Failed to add self to membership after joining: %v", err)
 				}
 			}
@@ -142,8 +149,7 @@ func main() {
 	} else {
 		// Bootstrap node: propose ourselves to the KV store
 		glog.Infof("Bootstrapping new cluster, proposing self to /_internal/peers")
-		peerValue := fmt.Sprintf("%s (%s)", finalGrpcAddr, shortName)
-		if err := cell.ProposeMembership(context.Background(), agentID, peerValue); err != nil {
+		if err := cell.ProposeMembership(context.Background(), agentID, selfInfo); err != nil {
 			glog.Errorf("Failed to bootstrap membership: %v", err)
 			os.Exit(1)
 		}
