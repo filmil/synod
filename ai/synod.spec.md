@@ -159,6 +159,13 @@
   mapping of short name to peer ID, and its API endpoints, which must be
   hyperlinked.
 
+#### Update P.2:
+
+* Modify all HTML pages to reload by default every 1 minute.
+* Add to all HTML pages a top dropdown menu, which allows the user to select
+  different values for reload periods: 1 second, 10 seconds, 30 seconds, 1 minute
+  5 minutes, 10 minutes, 20 minutes, 30 minutes, 1 hour.
+
 ## Bugs
 
 # B.1: /api/command
