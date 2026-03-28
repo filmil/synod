@@ -19,6 +19,7 @@
 * If you need to write temporary files you can use the dir `local`. Prefer to
   create files in a subdirectory of `local` keyed by this session's ID.
   * Anything that needs to be preserved across sessions, store in `local/common`.
+* Never ignore errors: either propagate them with context attached, or log them.
 
 ## Requirements
 
@@ -33,6 +34,8 @@
   functions and endpoints for all Paxos messages.
 * Use a SQLite for storing the ledger and any other needed state, place it in
   the state directory.
+* The state is a key-value store. The keys are unix-like paths, e.g. `/foo/bar`
+  and similar.
 * Serve a gRPC endpoint that can be used for agents to reach out to each other.
 * Serve a http end point which serves a rudimentary web page allowing users to
   monitor the state of the algorithm.
@@ -41,9 +44,14 @@
   * Use multi-card design so that we can have multiple status pages to select
     from.
   * Have one page which shows the current participants in the paxos algorithm.
+    * Make sure to show self.
   * Have one page which shows what messages we received and what we replied.
+    * pretty-print the messages, have each message key take a row of text in
+      a table cell.
   * Have a page which shows the URLs (and links to) all the endpoints of all
     known peers.
+  * Have one page which shows in a tabular form the contents of the entire
+    key value store, ordered by key name.
 * Serve a http endpoint to which a future command line tool can connect to issue
   commands to the paxos consensus cell.
 * Implement a Paxos decision algorithm based on this.
@@ -66,7 +74,11 @@
 * When starting a new agent, either supply a --peer flag which gives it a hostport
   for a peer to connect to, or start a new paxos cell if started without.
 * Each agent must keep a running view of the agent identities that take part in the
-  paxos algorithm. Each agent must run a process which continuously syncs up this
+  paxos algorithm.
+  * The identities are kept in the store with key `/_internal/peers`, and must
+    contain identities of all peers, including self.
+  * If no peers are known, then only self should be there.
+  * Each agent must run a process which continuously syncs up this
   view with that of other agents. Agents must use Paxos to coordinate this update.
 * When joining a new paxos cell, all currently present agents must agree to admit
   the new agent. Once that is done, the agent is admitted and can take part in

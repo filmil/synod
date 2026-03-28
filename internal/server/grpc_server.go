@@ -56,23 +56,26 @@ func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterR
 }
 
 func (s *PaxosServer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error) {
-	index, ids := s.cell.GetSyncState()
+	keys, err := s.cell.GetSyncState()
+	if err != nil {
+		glog.Errorf("gRPC Sync failed to get sync state: %v", err)
+	}
 	return &paxosv1.SyncResponse{
-		AgentId:             s.agentID,
-		HighestLedgerIndex:  index,
-		AgentIds:            ids,
+		AgentId: s.agentID,
+		Keys:    keys,
 	}, nil
 }
 
-func (s *PaxosServer) GetLedgerEntry(ctx context.Context, req *paxosv1.GetLedgerEntryRequest) (*paxosv1.GetLedgerEntryResponse, error) {
-	val, valType, err := s.store.GetLedgerEntry(req.LedgerIndex)
+func (s *PaxosServer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error) {
+	val, valType, propNum, err := s.store.GetKVEntry(req.Key)
 	if err != nil {
 		return nil, err
 	}
-	return &paxosv1.GetLedgerEntryResponse{
-		LedgerIndex: req.LedgerIndex,
-		Value:       val,
-		Type:        valType,
+	return &paxosv1.GetKVEntryResponse{
+		Key:     req.Key,
+		Value:   val,
+		Type:    valType,
+		Version: propNum,
 	}, nil
 }
 

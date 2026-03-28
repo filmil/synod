@@ -22,25 +22,34 @@ func TestIntegration_5Agents(t *testing.T) {
 	agents := make([]*agentInstance, numAgents)
 
 	// Start the first agent (bootstrap)
-	tmpDir0, _ := os.MkdirTemp("", "paxos-int-test-0-*")
+	tmpDir0, err := os.MkdirTemp("", "paxos-int-test-0-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
 	defer os.RemoveAll(tmpDir0)
 	addr0 := "127.0.0.1:50100"
 	agents[0] = newAgentInstance(t, "agent-0", tmpDir0, addr0)
 	go agents[0].run()
 
 	// Ensure self is in membership for agent-0
-	agents[0].store.AddMember("agent-0", addr0)
+	if err := agents[0].store.AddMember("agent-0", addr0); err != nil {
+		t.Fatalf("failed to add member: %v", err)
+	}
 
 	// Start other agents and join them to agent-0
 	for i := 1; i < numAgents; i++ {
-		tmpDir, _ := os.MkdirTemp("", fmt.Sprintf("paxos-int-test-%d-*", i))
+		tmpDir, err := os.MkdirTemp("", fmt.Sprintf("paxos-int-test-%d-*", i))
+		if err != nil {
+			t.Fatalf("failed to create temp dir: %v", err)
+		}
 		defer os.RemoveAll(tmpDir)
 
 		addr := fmt.Sprintf("127.0.0.1:%d", 50100+i)
 		agents[i] = newAgentInstance(t, fmt.Sprintf("agent-%d", i), tmpDir, addr)
 		// Ensure self is in membership
-		agents[i].store.AddMember(agents[i].id, addr)
-
+		if err := agents[i].store.AddMember(agents[i].id, addr); err != nil {
+			t.Fatalf("failed to add member: %v", err)
+		}
 		go agents[i].run()
 
 		// Join agent-0
@@ -80,9 +89,9 @@ func TestIntegration_5Agents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	err := agents[0].cell.Propose(ctx, []byte("exit"))
+	err := agents[0].cell.Propose(ctx, "/app/state", []byte("exit"))
 	if err != nil {
-		t.Fatalf("Consensus on 'exit' failed: %v", err)
+		t.Fatalf("Consensus on '/app/state' failed: %v", err)
 	}
 
 	// Wait for others to catch up the "exit" command
@@ -90,16 +99,13 @@ func TestIntegration_5Agents(t *testing.T) {
 
 	// Verify that all agents reached consensus on the "exit" command
 	for i := 0; i < numAgents; i++ {
-		index, _ := agents[i].store.GetHighestLedgerIndex()
-		// Depending on how many joins happened, the "exit" command might be at different indices.
-		// But it should be the LAST one.
-		val, valType, err := agents[i].store.GetLedgerEntry(index)
-		if err != nil {
-			t.Errorf("Agent %d: failed to get ledger entry at %d: %v", i, index, err)
+		val, valType, _, getErr := agents[i].store.GetKVEntry("/app/state")
+		if getErr != nil {
+			t.Errorf("Agent %d: failed to get KV entry for /app/state: %v", i, getErr)
 			continue
 		}
 		if string(val) != "exit" {
-			t.Errorf("Agent %d: expected 'exit' at index %d, got '%s' (type %s)", i, index, string(val), valType)
+			t.Errorf("Agent %d: expected 'exit' for /app/state, got '%s' (type %s)", i, string(val), valType)
 		}
 	}
 }

@@ -29,6 +29,7 @@ func (s *HTTPServer) Run() error {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/messages", s.handleMessages)
 	mux.HandleFunc("/peers", s.handlePeers)
+	mux.HandleFunc("/store", s.handleStore)
 	mux.HandleFunc("/api/command", s.handleCommand)
 	
 	// Serve locally saved bootstrap
@@ -44,9 +45,21 @@ func (s *HTTPServer) Run() error {
 }
 
 func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	agentID, _ := s.store.GetAgentID()
-	members, _ := s.store.GetMembers()
-	highestIndex, _ := s.store.GetHighestLedgerIndex()
+	agentID, err := s.store.GetAgentID()
+	if err != nil {
+		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	members, err := s.store.GetMembers()
+	if err != nil {
+		http.Error(w, "Failed to get members", http.StatusInternalServerError)
+		return
+	}
+	kvs, err := s.store.GetAllKVs()
+	if err != nil {
+		http.Error(w, "Failed to get KV store", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprintf(w, `
@@ -68,6 +81,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
         <div class="collapse navbar-collapse" id="navbarNav">
           <ul class="navbar-nav me-auto mb-2 mb-lg-0">
             <li class="nav-item"><a class="nav-link active" href="/">Status</a></li>
+            <li class="nav-item"><a class="nav-link" href="/store">KV Store</a></li>
             <li class="nav-item"><a class="nav-link" href="/messages">Messages</a></li>
             <li class="nav-item"><a class="nav-link" href="/peers">Peers</a></li>
           </ul>
@@ -81,7 +95,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
             <div class="card-header bg-primary text-white">Agent Info</div>
             <div class="card-body">
               <p class="card-text"><strong>ID:</strong> <small class="text-muted">%s</small></p>
-              <p class="card-text"><strong>Ledger Size:</strong> %d</p>
+              <p class="card-text"><strong>Keys Count:</strong> %d</p>
             </div>
           </div>
         </div>
@@ -94,7 +108,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
                   <thead>
                     <tr><th>Agent ID</th><th>Address</th></tr>
                   </thead>
-                  <tbody>`, agentID, agentID, highestIndex)
+                  <tbody>`, agentID, agentID, len(kvs))
 
 	var ids []string
 	for id := range members {
@@ -118,7 +132,10 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
             <div class="card-body">
               <form action="/api/command" method="post" class="row g-3">
                 <div class="col-auto">
-                  <input type="text" name="value" class="form-control" placeholder="Command value">
+                  <input type="text" name="key" class="form-control" placeholder="Key (e.g. /my/key)">
+                </div>
+                <div class="col-auto">
+                  <input type="text" name="value" class="form-control" placeholder="Value">
                 </div>
                 <div class="col-auto">
                   <button type="submit" class="btn btn-primary">Propose</button>
@@ -135,8 +152,16 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
-	agentID, _ := s.store.GetAgentID()
-	entries, _ := s.store.GetRecentMessages(100)
+	agentID, err := s.store.GetAgentID()
+	if err != nil {
+		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	entries, err := s.store.GetRecentMessages(100)
+	if err != nil {
+		http.Error(w, "Failed to get recent messages", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprintf(w, `
@@ -158,6 +183,7 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
         <div class="collapse navbar-collapse" id="navbarNav">
           <ul class="navbar-nav me-auto mb-2 mb-lg-0">
             <li class="nav-item"><a class="nav-link" href="/">Status</a></li>
+            <li class="nav-item"><a class="nav-link" href="/store">KV Store</a></li>
             <li class="nav-item"><a class="nav-link active" href="/messages">Messages</a></li>
             <li class="nav-item"><a class="nav-link" href="/peers">Peers</a></li>
           </ul>
@@ -203,8 +229,16 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
-	agentID, _ := s.store.GetAgentID()
-	members, _ := s.store.GetMembers()
+	agentID, err := s.store.GetAgentID()
+	if err != nil {
+		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	members, err := s.store.GetMembers()
+	if err != nil {
+		http.Error(w, "Failed to get members", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprintf(w, `
@@ -226,6 +260,7 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
         <div class="collapse navbar-collapse" id="navbarNav">
           <ul class="navbar-nav me-auto mb-2 mb-lg-0">
             <li class="nav-item"><a class="nav-link" href="/">Status</a></li>
+            <li class="nav-item"><a class="nav-link" href="/store">KV Store</a></li>
             <li class="nav-item"><a class="nav-link" href="/messages">Messages</a></li>
             <li class="nav-item"><a class="nav-link active" href="/peers">Peers</a></li>
           </ul>
@@ -276,24 +311,107 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 </html>`)
 }
 
+func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
+	agentID, err := s.store.GetAgentID()
+	if err != nil {
+		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	kvs, err := s.store.GetAllKVs()
+	if err != nil {
+		http.Error(w, "Failed to get KV store", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Synod Agent KV Store - %s</title>
+    <link href="/static/bootstrap.min.css" rel="stylesheet">
+  </head>
+  <body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+      <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">Synod Paxos Agent</span>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+            <li class="nav-item"><a class="nav-link" href="/">Status</a></li>
+            <li class="nav-item"><a class="nav-link active" href="/store">KV Store</a></li>
+            <li class="nav-item"><a class="nav-link" href="/messages">Messages</a></li>
+            <li class="nav-item"><a class="nav-link" href="/peers">Peers</a></li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+    <div class="container">
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-info text-white">Key-Value Store</div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Value</th>
+                  <th>Type</th>
+                  <th>Version</th>
+                </tr>
+              </thead>
+              <tbody>`, agentID)
+
+	for _, kv := range kvs {
+		fmt.Fprintf(w, `
+                <tr>
+                  <td><code>%s</code></td>
+                  <td><code>%s</code></td>
+                  <td>%s</td>
+                  <td>%d</td>
+                </tr>`, kv.Key, string(kv.Value), kv.Type, kv.Version)
+	}
+
+	fmt.Fprintf(w, `
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="/static/bootstrap.bundle.min.js"></script>
+  </body>
+</html>`)
+}
+
 func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	
+	key := r.FormValue("key")
+	if key == "" {
+		http.Error(w, "Key is required", http.StatusBadRequest)
+		return
+	}
+
 	val := r.FormValue("value")
 	if val == "" {
 		http.Error(w, "Value is required", http.StatusBadRequest)
 		return
 	}
 
-	glog.Infof("HTTP: Received proposal for value: %s", val)
-	if err := s.cell.Propose(r.Context(), []byte(val)); err != nil {
+	glog.Infof("HTTP: Received proposal for key %s with value: %s", key, val)
+	if err := s.cell.Propose(r.Context(), key, []byte(val)); err != nil {
 		glog.Errorf("HTTP: Proposal failed: %v", err)
 		http.Error(w, fmt.Sprintf("Paxos proposal failed: %v", err), http.StatusInternalServerError)
 		return
 	}
 	
-	fmt.Fprintf(w, "Consensus reached for value: %s. <a href='/'>Back</a>", val)
+	fmt.Fprintf(w, "Consensus reached for key %s with value: %s. <a href='/'>Back</a>", key, val)
 }
