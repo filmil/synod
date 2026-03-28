@@ -27,7 +27,7 @@ func NewProposer(agentID string, peers []PeerClient, acceptor *Acceptor) *Propos
 	}
 }
 
-func (p *Proposer) Propose(ctx context.Context, index uint64, value []byte) error {
+func (p *Proposer) Propose(ctx context.Context, key string, value []byte) ([]byte, error) {
 	p.mu.Lock()
 	proposalID := &paxosv1.ProposalID{
 		Number:  p.nextNum,
@@ -37,14 +37,14 @@ func (p *Proposer) Propose(ctx context.Context, index uint64, value []byte) erro
 	p.mu.Unlock()
 
 	nonce := uuid.New().String()
-	glog.Infof("Proposer(%s): Starting proposal for index %d, proposal %v, nonce %s", 
-		p.agentID, index, proposalID, nonce)
+	glog.Infof("Proposer(%s): Starting proposal for key %s, proposal %v, nonce %s", 
+		p.agentID, key, proposalID, nonce)
 
 	// Phase 1: Prepare
-	promises := p.sendPrepare(ctx, index, proposalID, nonce)
+	promises := p.sendPrepare(ctx, key, proposalID, nonce)
 	if len(promises) < p.quorum() {
-		glog.Warningf("Proposer(%s): Phase 1 failed for index %d: no quorum", p.agentID, index)
-		return fmt.Errorf("failed to reach quorum in Phase 1 (Prepare): got %d, need %d", len(promises), p.quorum())
+		glog.Warningf("Proposer(%s): Phase 1 failed for key %s: no quorum", p.agentID, key)
+		return nil, fmt.Errorf("failed to reach quorum in Phase 1 (Prepare): got %d, need %d", len(promises), p.quorum())
 	}
 
 	// Pick the value from the highest accepted proposal
@@ -59,14 +59,14 @@ func (p *Proposer) Propose(ctx context.Context, index uint64, value []byte) erro
 	}
 
 	// Phase 2: Accept
-	acceptedCount := p.sendAccept(ctx, index, proposalID, value, nonce)
+	acceptedCount := p.sendAccept(ctx, key, proposalID, value, nonce)
 	if acceptedCount < p.quorum() {
-		glog.Warningf("Proposer(%s): Phase 2 failed for index %d: no quorum", p.agentID, index)
-		return fmt.Errorf("failed to reach quorum in Phase 2 (Accept): got %d, need %d", acceptedCount, p.quorum())
+		glog.Warningf("Proposer(%s): Phase 2 failed for key %s: no quorum", p.agentID, key)
+		return nil, fmt.Errorf("failed to reach quorum in Phase 2 (Accept): got %d, need %d", acceptedCount, p.quorum())
 	}
 
-	glog.Infof("Proposer(%s): Consensus reached for index %d", p.agentID, index)
-	return nil
+	glog.Infof("Proposer(%s): Consensus reached for key %s", p.agentID, key)
+	return value, nil
 }
 
 func (p *Proposer) quorum() int {
@@ -74,16 +74,16 @@ func (p *Proposer) quorum() int {
 	return total/2 + 1
 }
 
-func (p *Proposer) sendPrepare(ctx context.Context, index uint64, id *paxosv1.ProposalID, nonce string) []*paxosv1.PromiseResponse {
+func (p *Proposer) sendPrepare(ctx context.Context, key string, id *paxosv1.ProposalID, nonce string) []*paxosv1.PromiseResponse {
 	var mu sync.Mutex
 	var results []*paxosv1.PromiseResponse
 	var wg sync.WaitGroup
 
 	req := &paxosv1.PrepareRequest{
-		AgentId:     p.agentID,
-		ProposalId:  id,
-		LedgerIndex: index,
-		Nonce:       nonce,
+		AgentId:    p.agentID,
+		ProposalId: id,
+		Key:        key,
+		Nonce:      nonce,
 	}
 
 	// Prepare self
@@ -112,17 +112,17 @@ func (p *Proposer) sendPrepare(ctx context.Context, index uint64, id *paxosv1.Pr
 	return results
 }
 
-func (p *Proposer) sendAccept(ctx context.Context, index uint64, id *paxosv1.ProposalID, value []byte, nonce string) int {
+func (p *Proposer) sendAccept(ctx context.Context, key string, id *paxosv1.ProposalID, value []byte, nonce string) int {
 	var mu sync.Mutex
 	count := 0
 	var wg sync.WaitGroup
 
 	req := &paxosv1.AcceptRequest{
-		AgentId:     p.agentID,
-		ProposalId:  id,
-		LedgerIndex: index,
-		Value:       value,
-		Nonce:       nonce,
+		AgentId:    p.agentID,
+		ProposalId: id,
+		Key:        key,
+		Value:      value,
+		Nonce:      nonce,
 	}
 
 	// Accept self

@@ -14,11 +14,11 @@ service PaxosService {
   // Request to join the cluster.
   rpc JoinCluster(JoinClusterRequest) returns (JoinClusterResponse) {}
 
-  // Used for continuously syncing up the view of agent identities.
+  // Used for continuously syncing up the view of agent identities and KV store.
   rpc Sync(SyncRequest) returns (SyncResponse) {}
 
-  // Fetch a ledger entry.
-  rpc GetLedgerEntry(GetLedgerEntryRequest) returns (GetLedgerEntryResponse) {}
+  // Fetch a Key-Value entry.
+  rpc GetKVEntry(GetKVEntryRequest) returns (GetKVEntryResponse) {}
 }
 
 message ProposalID {
@@ -29,7 +29,7 @@ message ProposalID {
 message PrepareRequest {
   string agent_id = 1;
   ProposalID proposal_id = 2;
-  uint64 ledger_index = 3; // Which slot we are preparing for
+  string key = 3; // The key we are preparing for
   string nonce = 4;
 }
 
@@ -43,7 +43,7 @@ message PromiseResponse {
 message AcceptRequest {
   string agent_id = 1;
   ProposalID proposal_id = 2;
-  uint64 ledger_index = 3;
+  string key = 3;
   bytes value = 4;
   string nonce = 5;
 }
@@ -66,21 +66,20 @@ message JoinClusterResponse {
 
 message SyncRequest {
   string agent_id = 1;
-  uint64 highest_ledger_index = 2;
 }
 
 message SyncResponse {
   string agent_id = 1;
-  uint64 highest_ledger_index = 2;
-  repeated string agent_ids = 3; // Simplified sync response
+  map<string, uint64> keys = 2; // key -> version
 }
 
-message GetLedgerEntryRequest {
-  uint64 ledger_index = 1;
+message GetKVEntryRequest {
+  string key = 1;
 }
 
-message GetLedgerEntryResponse {
-  uint64 ledger_index = 1;
+message GetKVEntryResponse {
+  string key = 1;
   bytes value = 2;
   string type = 3;
+  uint64 version = 4;
 }

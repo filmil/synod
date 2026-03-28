@@ -43,8 +43,8 @@ func (c *PaxosClient) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxo
 	return c.client.Sync(ctx, req)
 }
 
-func (c *PaxosClient) GetLedgerEntry(ctx context.Context, req *paxosv1.GetLedgerEntryRequest) (*paxosv1.GetLedgerEntryResponse, error) {
-	return c.client.GetLedgerEntry(ctx, req)
+func (c *PaxosClient) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error) {
+	return c.client.GetKVEntry(ctx, req)
 }
 
 func (c *PaxosClient) AgentID() string {

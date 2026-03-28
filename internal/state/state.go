@@ -49,7 +49,7 @@ func (s *Store) init() error {
 	);
 
 	CREATE TABLE IF NOT EXISTS acceptor_state (
-		ledger_index INTEGER PRIMARY KEY,
+		key TEXT PRIMARY KEY,
 		promised_id_num INTEGER,
 		promised_id_agent TEXT,
 		accepted_id_num INTEGER,
@@ -57,10 +57,11 @@ func (s *Store) init() error {
 		accepted_value BLOB
 	);
 
-	CREATE TABLE IF NOT EXISTS ledger (
-		ledger_index INTEGER PRIMARY KEY,
+	CREATE TABLE IF NOT EXISTS kv_store (
+		key TEXT PRIMARY KEY,
 		value BLOB,
-		type TEXT
+		type TEXT,
+		version INTEGER
 	);
 
 	CREATE TABLE IF NOT EXISTS membership (
@@ -78,8 +79,10 @@ func (s *Store) init() error {
 		reply BLOB
 	);
 	`
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return fmt.Errorf("failed to initialize database schema: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) GetAgentID() (string, error) {
@@ -87,27 +90,28 @@ func (s *Store) GetAgentID() (string, error) {
 	err := s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'agent_id'").Scan(&id)
 	if err == sql.ErrNoRows {
 		id = uuid.New().String()
-		_, err = s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('agent_id', ?)", id)
-		if err != nil {
-			return "", err
+		if _, err := s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('agent_id', ?)", id); err != nil {
+			return "", fmt.Errorf("failed to insert new agent ID: %w", err)
 		}
 		glog.Infof("Generated new agent ID: %s", id)
 		return id, nil
+	} else if err != nil {
+		return "", fmt.Errorf("failed to query agent ID: %w", err)
 	}
-	return id, err
+	return id, nil
 }
 
 func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) GetAcceptorState(index uint64) (promisedID *paxosv1.ProposalID, acceptedID *paxosv1.ProposalID, acceptedValue []byte, err error) {
+func (s *Store) GetAcceptorState(key string) (promisedID *paxosv1.ProposalID, acceptedID *paxosv1.ProposalID, acceptedValue []byte, err error) {
 	var pIDNum, aIDNum sql.NullInt64
 	var pIDAgent, aIDAgent sql.NullString
 
 	err = s.db.QueryRow(`
 		SELECT promised_id_num, promised_id_agent, accepted_id_num, accepted_id_agent, accepted_value 
-		FROM acceptor_state WHERE ledger_index = ?`, index).Scan(
+		FROM acceptor_state WHERE key = ?`, key).Scan(
 		&pIDNum, &pIDAgent, &aIDNum, &aIDAgent, &acceptedValue)
 
 	if err == sql.ErrNoRows {
@@ -127,29 +131,35 @@ func (s *Store) GetAcceptorState(index uint64) (promisedID *paxosv1.ProposalID, 
 	return promisedID, acceptedID, acceptedValue, nil
 }
 
-func (s *Store) SetPromisedID(index uint64, id *paxosv1.ProposalID) error {
+func (s *Store) SetPromisedID(key string, id *paxosv1.ProposalID) error {
 	_, err := s.db.Exec(`
-		INSERT INTO acceptor_state (ledger_index, promised_id_num, promised_id_agent)
+		INSERT INTO acceptor_state (key, promised_id_num, promised_id_agent)
 		VALUES (?, ?, ?)
-		ON CONFLICT(ledger_index) DO UPDATE SET
+		ON CONFLICT(key) DO UPDATE SET
 			promised_id_num = excluded.promised_id_num,
 			promised_id_agent = excluded.promised_id_agent`,
-		index, id.Number, id.AgentId)
-	return err
+		key, id.Number, id.AgentId)
+	if err != nil {
+		return fmt.Errorf("failed to set promised ID: %w", err)
+	}
+	return nil
 }
 
-func (s *Store) SetAcceptedValue(index uint64, id *paxosv1.ProposalID, value []byte) error {
+func (s *Store) SetAcceptedValue(key string, id *paxosv1.ProposalID, value []byte) error {
 	_, err := s.db.Exec(`
-		INSERT INTO acceptor_state (ledger_index, promised_id_num, promised_id_agent, accepted_id_num, accepted_id_agent, accepted_value)
+		INSERT INTO acceptor_state (key, promised_id_num, promised_id_agent, accepted_id_num, accepted_id_agent, accepted_value)
 		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(ledger_index) DO UPDATE SET
+		ON CONFLICT(key) DO UPDATE SET
 			promised_id_num = excluded.promised_id_num,
 			promised_id_agent = excluded.promised_id_agent,
 			accepted_id_num = excluded.accepted_id_num,
 			accepted_id_agent = excluded.accepted_id_agent,
 			accepted_value = excluded.accepted_value`,
-		index, id.Number, id.AgentId, id.Number, id.AgentId, value)
-	return err
+		key, id.Number, id.AgentId, id.Number, id.AgentId, value)
+	if err != nil {
+		return fmt.Errorf("failed to set accepted value: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) AddMember(agentID, address string) error {
@@ -157,7 +167,10 @@ func (s *Store) AddMember(agentID, address string) error {
 		INSERT INTO membership (agent_id, address) VALUES (?, ?)
 		ON CONFLICT(agent_id) DO UPDATE SET address = excluded.address`,
 		agentID, address)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to add member: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) GetMembers() (map[string]string, error) {
@@ -178,40 +191,82 @@ func (s *Store) GetMembers() (map[string]string, error) {
 	return members, nil
 }
 
-func (s *Store) CommitLedger(index uint64, value []byte, valType string) error {
+func (s *Store) CommitKV(key string, value []byte, valType string, version uint64) error {
 	_, err := s.db.Exec(`
-		INSERT INTO ledger (ledger_index, value, type) VALUES (?, ?, ?)
-		ON CONFLICT(ledger_index) DO UPDATE SET
+		INSERT INTO kv_store (key, value, type, version) VALUES (?, ?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET
 			value = excluded.value,
-			type = excluded.type`,
-		index, value, valType)
-	return err
-}
-
-func (s *Store) GetHighestLedgerIndex() (uint64, error) {
-	var index uint64
-	err := s.db.QueryRow("SELECT MAX(ledger_index) FROM ledger").Scan(&index)
-	if err == sql.ErrNoRows {
-		return 0, nil
-	}
-	// Handle the case where the table is empty (MAX returns NULL)
-	var nullIndex sql.NullInt64
-	err = s.db.QueryRow("SELECT MAX(ledger_index) FROM ledger").Scan(&nullIndex)
+			type = excluded.type,
+			version = excluded.version`,
+		key, value, valType, version)
 	if err != nil {
-		return 0, err
+		return fmt.Errorf("failed to commit KV: %w", err)
 	}
-	if !nullIndex.Valid {
-		return 0, nil
-	}
-	return uint64(nullIndex.Int64), nil
+	return nil
 }
 
-func (s *Store) GetLedgerEntry(index uint64) (value []byte, valType string, err error) {
-	err = s.db.QueryRow("SELECT value, type FROM ledger WHERE ledger_index = ?", index).Scan(&value, &valType)
-	if err == sql.ErrNoRows {
-		return nil, "", nil
+func (s *Store) GetKVState() (map[string]uint64, error) {
+	rows, err := s.db.Query("SELECT key, version FROM kv_store")
+	if err != nil {
+		return nil, err
 	}
-	return value, valType, err
+	defer rows.Close()
+
+	keys := make(map[string]uint64)
+	for rows.Next() {
+		var k string
+		var pn sql.NullInt64
+		if err := rows.Scan(&k, &pn); err != nil {
+			return nil, err
+		}
+		if pn.Valid {
+			keys[k] = uint64(pn.Int64)
+		} else {
+			keys[k] = 0
+		}
+	}
+	return keys, nil
+}
+
+func (s *Store) GetKVEntry(key string) (value []byte, valType string, version uint64, err error) {
+	var pn sql.NullInt64
+	err = s.db.QueryRow("SELECT value, type, version FROM kv_store WHERE key = ?", key).Scan(&value, &valType, &pn)
+	if err == sql.ErrNoRows {
+		return nil, "", 0, nil
+	}
+	if pn.Valid {
+		version = uint64(pn.Int64)
+	}
+	return value, valType, version, err
+}
+
+type KVEntry struct {
+	Key     string
+	Value   []byte
+	Type    string
+	Version uint64
+}
+
+func (s *Store) GetAllKVs() ([]KVEntry, error) {
+	rows, err := s.db.Query("SELECT key, value, type, version FROM kv_store ORDER BY key")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []KVEntry
+	for rows.Next() {
+		var e KVEntry
+		var pn sql.NullInt64
+		if err := rows.Scan(&e.Key, &e.Value, &e.Type, &pn); err != nil {
+			return nil, err
+		}
+		if pn.Valid {
+			e.Version = uint64(pn.Int64)
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
 }
 
 func (s *Store) LogMessage(msgType, sender, receiver string, message, reply []byte) error {
@@ -219,7 +274,10 @@ func (s *Store) LogMessage(msgType, sender, receiver string, message, reply []by
 		INSERT INTO message_log (type, sender, receiver, message, reply)
 		VALUES (?, ?, ?, ?, ?)`,
 		msgType, sender, receiver, message, reply)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to log message: %w", err)
+	}
+	return nil
 }
 
 type LogEntry struct {

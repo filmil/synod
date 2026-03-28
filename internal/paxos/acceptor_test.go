@@ -28,9 +28,9 @@ func TestAcceptor(t *testing.T) {
 
 	// Initial prepare
 	req1 := &paxosv1.PrepareRequest{
-		AgentId:     "other-agent",
-		ProposalId:  &paxosv1.ProposalID{Number: 1, AgentId: "a"},
-		LedgerIndex: 1,
+		AgentId:    "other-agent",
+		ProposalId: &paxosv1.ProposalID{Number: 1, AgentId: "a"},
+		Key:        "/test/key",
 	}
 	resp1, err := a.Prepare(ctx, req1)
 	if err != nil {
@@ -45,9 +45,9 @@ func TestAcceptor(t *testing.T) {
 
 	// Prepare with lower ID should fail
 	req2 := &paxosv1.PrepareRequest{
-		AgentId:     "other-agent",
-		ProposalId:  &paxosv1.ProposalID{Number: 0, AgentId: "a"},
-		LedgerIndex: 1,
+		AgentId:    "other-agent",
+		ProposalId: &paxosv1.ProposalID{Number: 0, AgentId: "a"},
+		Key:        "/test/key",
 	}
 	resp2, err := a.Prepare(ctx, req2)
 	if err != nil {
@@ -63,10 +63,10 @@ func TestAcceptor(t *testing.T) {
 	// Accept with promised ID should succeed
 	val := []byte("hello")
 	req3 := &paxosv1.AcceptRequest{
-		AgentId:     "other-agent",
-		ProposalId:  req1.ProposalId,
-		LedgerIndex: 1,
-		Value:       val,
+		AgentId:    "other-agent",
+		ProposalId: req1.ProposalId,
+		Key:        "/test/key",
+		Value:      val,
 	}
 	resp3, err := a.Accept(ctx, req3)
 	if err != nil {

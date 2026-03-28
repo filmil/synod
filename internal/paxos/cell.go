@@ -1,6 +1,7 @@
 package paxos
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,7 +24,7 @@ type PeerClient interface {
 	Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*paxosv1.AcceptedResponse, error)
 	JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error)
 	Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error)
-	GetLedgerEntry(ctx context.Context, req *paxosv1.GetLedgerEntryRequest) (*paxosv1.GetLedgerEntryResponse, error)
+	GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error)
 	AgentID() string
 }
 
@@ -62,59 +63,93 @@ func (c *Cell) SetPeers(peers []PeerClient) {
 	c.proposer = NewProposer(c.agentID, peers, c.acceptor)
 }
 
-func (c *Cell) Propose(ctx context.Context, value []byte) error {
-	return c.proposeWithType(ctx, value, "data")
+func (c *Cell) Propose(ctx context.Context, key string, value []byte) error {
+	for {
+		_, _, version, err := c.store.GetKVEntry(key)
+		if err != nil {
+			return fmt.Errorf("failed to get KV entry for %s: %w", key, err)
+		}
+		nextVersion := version + 1
+		instanceKey := fmt.Sprintf("%s@%d", key, nextVersion)
+
+		glog.Infof("Cell(%s): Proposing data for %s", c.agentID, instanceKey)
+
+		chosenValue, err := c.proposer.Propose(ctx, instanceKey, value)
+		if err != nil {
+			return err
+		}
+
+		if err := c.store.CommitKV(key, chosenValue, "data", nextVersion); err != nil {
+			return fmt.Errorf("failed to commit kv: %w", err)
+		}
+
+		if bytes.Equal(chosenValue, value) {
+			return nil
+		}
+		glog.Infof("Cell(%s): Value at %s was overwritten by someone else, retrying...", c.agentID, instanceKey)
+	}
 }
 
 func (c *Cell) ProposeMembership(ctx context.Context, agentID, address string) error {
-	change := MembershipChange{
-		Action:  "ADD",
-		AgentID: agentID,
-		Address: address,
-	}
-	value, err := json.Marshal(change)
-	if err != nil {
-		return fmt.Errorf("failed to marshal membership change: %w", err)
-	}
-	return c.proposeWithType(ctx, value, "membership")
-}
+	key := "/_internal/peers"
+	for {
+		val, _, version, err := c.store.GetKVEntry(key)
+		if err != nil {
+			return fmt.Errorf("failed to get KV entry for peers: %w", err)
+		}
+		var peers map[string]string
+		if val != nil {
+			if err := json.Unmarshal(val, &peers); err != nil {
+				glog.Errorf("Cell(%s): Failed to unmarshal peers map: %v", c.agentID, err)
+				peers = make(map[string]string)
+			}
+		} else {
+			peers = make(map[string]string)
+		}
 
-func (c *Cell) proposeWithType(ctx context.Context, value []byte, valType string) error {
-	index, err := c.store.GetHighestLedgerIndex()
-	if err != nil {
-		return fmt.Errorf("failed to get highest ledger index: %w", err)
+		// Check if already correct
+		if peers[agentID] == address {
+			return nil
+		}
+
+		peers[agentID] = address
+		newVal, err := json.Marshal(peers)
+		if err != nil {
+			return fmt.Errorf("failed to marshal membership: %w", err)
+		}
+
+		nextVersion := version + 1
+		instanceKey := fmt.Sprintf("%s@%d", key, nextVersion)
+		
+		glog.Infof("Cell(%s): Proposing membership for %s", c.agentID, instanceKey)
+
+		chosenValue, err := c.proposer.Propose(ctx, instanceKey, newVal)
+		if err != nil {
+			return err
+		}
+
+		if err := c.store.CommitKV(key, chosenValue, "membership", nextVersion); err != nil {
+			return fmt.Errorf("failed to commit kv: %w", err)
+		}
+
+		c.ApplyMembershipChange(chosenValue)
+
+		if bytes.Equal(chosenValue, newVal) {
+			return nil
+		}
+		glog.Infof("Cell(%s): Membership at %s was updated concurrently, retrying...", c.agentID, instanceKey)
 	}
-
-	nextIndex := index + 1
-	glog.Infof("Proposing %s for ledger index %d", valType, nextIndex)
-
-	if err := c.proposer.Propose(ctx, nextIndex, value); err != nil {
-		return err
-	}
-
-	// Once paxos consensus is reached, commit to ledger.
-	if err := c.store.CommitLedger(nextIndex, value, valType); err != nil {
-		return fmt.Errorf("failed to commit ledger: %w", err)
-	}
-
-	// If it was a membership change, update local view.
-	if valType == "membership" {
-		c.ApplyMembershipChange(value)
-	}
-
-	return nil
 }
 
 func (c *Cell) ApplyMembershipChange(value []byte) {
-	var change MembershipChange
-	if err := json.Unmarshal(value, &change); err != nil {
-		glog.Errorf("Cell(%s): Failed to unmarshal membership change: %v", c.agentID, err)
+	var peers map[string]string
+	if err := json.Unmarshal(value, &peers); err != nil {
+		glog.Errorf("Cell(%s): Failed to unmarshal membership map: %v", c.agentID, err)
 		return
 	}
 
-	if change.Action == "ADD" {
-		glog.Infof("Cell(%s): Applying membership change: add %s at %s", c.agentID, change.AgentID, change.Address)
-		c.store.AddMember(change.AgentID, change.Address)
+	for id, addr := range peers {
+		c.store.AddMember(id, addr)
 	}
 }
 
@@ -178,54 +213,67 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 	}
 	c.mu.Unlock()
 
-	localIndex, _ := c.store.GetHighestLedgerIndex()
+	localState, err := c.store.GetKVState()
+	if err != nil {
+		glog.Errorf("Cell(%s): Failed to get local KV state: %v", c.agentID, err)
+		return
+	}
 
 	for _, p := range peers {
 		resp, err := p.Sync(ctx, &paxosv1.SyncRequest{
-			AgentId:            c.agentID,
-			HighestLedgerIndex: localIndex,
+			AgentId: c.agentID,
 		})
 		if err != nil {
 			continue
 		}
 
-		if resp.HighestLedgerIndex > localIndex {
-			glog.Infof("Cell(%s): Peer %s has higher ledger index %d (local %d), catching up...", 
-				c.agentID, p.AgentID(), resp.HighestLedgerIndex, localIndex)
-			c.CatchUp(ctx, p, localIndex+1, resp.HighestLedgerIndex)
-			// Update local index after catch up
-			localIndex, _ = c.store.GetHighestLedgerIndex()
+		for key, peerPropNum := range resp.Keys {
+			localPropNum, exists := localState[key]
+			if !exists || peerPropNum > localPropNum {
+				glog.Infof("Cell(%s): Peer %s has newer state for key %s (%d > %d), catching up...", 
+					c.agentID, p.AgentID(), key, peerPropNum, localPropNum)
+				c.CatchUp(ctx, p, key)
+				// Update local state map after catch up
+				_, _, newPropNum, err := c.store.GetKVEntry(key)
+				if err != nil {
+					glog.Errorf("Cell(%s): Failed to get updated KV entry for %s after catchup: %v", c.agentID, key, err)
+				} else {
+					localState[key] = newPropNum
+				}
+			}
 		}
 	}
 }
 
-func (c *Cell) CatchUp(ctx context.Context, p PeerClient, from, to uint64) {
-	for i := from; i <= to; i++ {
-		resp, err := p.GetLedgerEntry(ctx, &paxosv1.GetLedgerEntryRequest{LedgerIndex: i})
-		if err != nil {
-			glog.Errorf("Cell(%s): Failed to get ledger entry %d from %s: %v", c.agentID, i, p.AgentID(), err)
-			break
-		}
-		if resp.Value == nil {
-			continue
-		}
-		glog.Infof("Cell(%s): Catching up entry %d type %s", c.agentID, i, resp.Type)
-		if err := c.store.CommitLedger(i, resp.Value, resp.Type); err != nil {
-			glog.Errorf("Cell(%s): Failed to commit caught up ledger entry %d: %v", c.agentID, i, err)
-			break
-		}
-		if resp.Type == "membership" {
-			c.ApplyMembershipChange(resp.Value)
-		}
+func (c *Cell) CatchUp(ctx context.Context, p PeerClient, key string) {
+	resp, err := p.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: key})
+	if err != nil {
+		glog.Errorf("Cell(%s): Failed to get KV entry %s from %s: %v", c.agentID, key, p.AgentID(), err)
+		return
+	}
+	if resp.Value == nil {
+		return
+	}
+	glog.Infof("Cell(%s): Catching up entry %s type %s", c.agentID, key, resp.Type)
+	
+	// Ensure we also save the accepted value in the acceptor state so we don't propose over it with an older number
+	if err := c.store.SetAcceptedValue(key, &paxosv1.ProposalID{Number: resp.Version, AgentId: p.AgentID()}, resp.Value); err != nil {
+		glog.Errorf("Cell(%s): Failed to set accepted value during catchup: %v", c.agentID, err)
+	}
+	
+	if err := c.store.CommitKV(key, resp.Value, resp.Type, resp.Version); err != nil {
+		glog.Errorf("Cell(%s): Failed to commit caught up KV entry %s: %v", c.agentID, key, err)
+		return
+	}
+	if resp.Type == "membership" {
+		c.ApplyMembershipChange(resp.Value)
 	}
 }
 
-func (c *Cell) GetSyncState() (uint64, []string) {
-	index, _ := c.store.GetHighestLedgerIndex()
-	members, _ := c.store.GetMembers()
-	var ids []string
-	for id := range members {
-		ids = append(ids, id)
+func (c *Cell) GetSyncState() (map[string]uint64, error) {
+	keys, err := c.store.GetKVState()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get KV state: %w", err)
 	}
-	return index, ids
+	return keys, nil
 }

@@ -47,7 +47,7 @@ func (m *mockPeer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1
 	return nil, nil
 }
 
-func (m *mockPeer) GetLedgerEntry(ctx context.Context, req *paxosv1.GetLedgerEntryRequest) (*paxosv1.GetLedgerEntryResponse, error) {
+func (m *mockPeer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error) {
 	return nil, nil
 }
 
@@ -88,16 +88,22 @@ func TestProposer_Success(t *testing.T) {
 	p := NewProposer(agentID, peers, acceptor)
 	ctx := context.Background()
 
-	err = p.Propose(ctx, 1, []byte("consensus-value"))
+	_, err = p.Propose(ctx, "/test/key", []byte("consensus-value"))
 	if err != nil {
 		t.Fatalf("Propose failed: %v", err)
 	}
 }
 
 func TestProposer_NoQuorum(t *testing.T) {
-	tmpDir, _ := os.MkdirTemp("", "proposer-test-*")
+	tmpDir, err := os.MkdirTemp("", "proposer-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
 	defer os.RemoveAll(tmpDir)
-	store, _ := state.NewStore(tmpDir)
+	store, err := state.NewStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
 	defer store.Close()
 
 	agentID := "proposer-agent"
@@ -118,7 +124,7 @@ func TestProposer_NoQuorum(t *testing.T) {
 	p := NewProposer(agentID, peers, acceptor)
 	ctx := context.Background()
 
-	err := p.Propose(ctx, 1, []byte("val"))
+	_, err = p.Propose(ctx, "/test/key", []byte("val"))
 	if err == nil {
 		t.Fatalf("Expected Propose to fail due to lack of quorum")
 	}
