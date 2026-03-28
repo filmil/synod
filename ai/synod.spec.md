@@ -22,6 +22,7 @@
 * Never ignore errors: either propagate them with context attached, or log them.
 * Don't use `glog.Fatalf`, instead log at `glog.Errof` and call `os.Exit` instead.
 * Find and save LICENSE for all dirs in //third_party
+* Use "Conventiona Commits 1.0.0" when creating commits.
 
 ### Update P.1
 
