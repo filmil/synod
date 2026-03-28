@@ -483,6 +483,22 @@ func (c *Cell) GetSyncState() (map[string]uint64, error) {
 	return keys, nil
 }
 
+// GetActivePeers returns a snapshot of the current connected peers.
+func (c *Cell) GetActivePeers() []PeerClient {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	peers := make([]PeerClient, 0, len(c.peers))
+	for _, p := range c.peers {
+		peers = append(peers, p)
+	}
+	return peers
+}
+
+// GetStore returns the underlying state store.
+func (c *Cell) GetStore() *state.Store {
+	return c.store
+}
+
 func (c *Cell) StartEndpointSyncLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
