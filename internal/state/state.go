@@ -183,31 +183,46 @@ func (s *Store) SetAcceptedValue(key string, id *paxosv1.ProposalID, value []byt
 	return nil
 }
 
-func (s *Store) AddMember(agentID, address string) error {
-	_, err := s.db.Exec(`
+type PeerInfo struct {
+	GRPCAddr  string `json:"grpc_addr"`
+	HTTPURL   string `json:"http_url"`
+	ShortName string `json:"short_name"`
+}
+
+func (s *Store) AddMember(agentID string, info PeerInfo) error {
+	b, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("failed to marshal peer info: %w", err)
+	}
+	_, err = s.db.Exec(`
 		INSERT INTO membership (agent_id, address) VALUES (?, ?)
 		ON CONFLICT(agent_id) DO UPDATE SET address = excluded.address`,
-		agentID, address)
+		agentID, string(b))
 	if err != nil {
 		return fmt.Errorf("failed to add member: %w", err)
 	}
 	return nil
 }
 
-func (s *Store) GetMembers() (map[string]string, error) {
+func (s *Store) GetMembers() (map[string]PeerInfo, error) {
 	rows, err := s.db.Query("SELECT agent_id, address FROM membership")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	members := make(map[string]string)
+	members := make(map[string]PeerInfo)
 	for rows.Next() {
-		var id, addr string
-		if err := rows.Scan(&id, &addr); err != nil {
+		var id, infoStr string
+		if err := rows.Scan(&id, &infoStr); err != nil {
 			return nil, err
 		}
-		members[id] = addr
+		var info PeerInfo
+		// Fallback for old data where address was just a plain string
+		if err := json.Unmarshal([]byte(infoStr), &info); err != nil {
+			info = PeerInfo{GRPCAddr: infoStr, ShortName: "Unknown"}
+		}
+		members[id] = info
 	}
 	return members, nil
 }

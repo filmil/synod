@@ -96,9 +96,12 @@
   * If no peers are known, then only self should be there.
   * Each agent must run a process which continuously syncs up this
   view with that of other agents. Agents must use Paxos to coordinate this update.
-* When joining a new paxos cell, all currently present agents must agree to admit
-  the new agent. Once that is done, the agent is admitted and can take part in
-  decisions. Else, that agent will be ignored.
+* When joining a new paxos cell:
+  * The new participant must share its ID, and its gRPC and HTTPS endpoints.
+  * all currently present agents must agree to admit the new agent.
+    * Once that is done, the agent is admitted and can take part in decisions.
+      Else, that agent will be ignored.
+
 
 ### Testing
 

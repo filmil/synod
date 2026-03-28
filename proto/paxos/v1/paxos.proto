@@ -56,6 +56,8 @@ message AcceptedResponse {
 message JoinClusterRequest {
   string agent_id = 1;
   string host_port = 2;
+  string short_name = 3;
+  string http_url = 4;
 }
 
 message JoinClusterResponse {
