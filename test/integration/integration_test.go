@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/filmil/synod/internal/paxos"
-	"github.com/filmil/synod/internal/state"
 	"github.com/filmil/synod/internal/server"
+	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 )
 
@@ -20,14 +20,14 @@ func TestIntegration_5Agents(t *testing.T) {
 
 	numAgents := 5
 	agents := make([]*agentInstance, numAgents)
-	
+
 	// Start the first agent (bootstrap)
 	tmpDir0, _ := os.MkdirTemp("", "paxos-int-test-0-*")
 	defer os.RemoveAll(tmpDir0)
 	addr0 := "127.0.0.1:50100"
 	agents[0] = newAgentInstance(t, "agent-0", tmpDir0, addr0)
 	go agents[0].run()
-	
+
 	// Ensure self is in membership for agent-0
 	agents[0].store.AddMember("agent-0", addr0)
 
@@ -40,7 +40,7 @@ func TestIntegration_5Agents(t *testing.T) {
 		agents[i] = newAgentInstance(t, fmt.Sprintf("agent-%d", i), tmpDir, addr)
 		// Ensure self is in membership
 		agents[i].store.AddMember(agents[i].id, addr)
-		
+
 		go agents[i].run()
 
 		// Join agent-0
@@ -84,7 +84,7 @@ func TestIntegration_5Agents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Consensus on 'exit' failed: %v", err)
 	}
-	
+
 	// Wait for others to catch up the "exit" command
 	time.Sleep(3 * time.Second)
 
