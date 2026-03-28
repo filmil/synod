@@ -3,7 +3,66 @@
 [![Build and Test](https://github.com/filmil/synod/actions/workflows/build-test.yml/badge.svg)](https://github.com/filmil/synod/actions/workflows/build-test.yml)
 [![Release Agent](https://github.com/filmil/synod/actions/workflows/release.yml/badge.svg)](https://github.com/filmil/synod/actions/workflows/release.yml)
 
-Synod is a distributed Paxos coordination agent implemented in Go, managing a synchronized Key-Value store across dynamically joining network peers.
+## What it does
+
+Synod is a distributed Paxos coordination agent implemented in Go. It manages a highly available, synchronized Key-Value store across a network of peers using the Paxos consensus algorithm. It allows multiple dynamically joining network nodes to agree on a shared state, ensuring fault tolerance and consistency across the cluster.
+
+## Quickstart
+
+This quickstart shows how to download the repository and quickly start 3 synod agents which talk to each other and are already set up to work properly. It establishes state directories for each agent following the XDG base directory specification.
+
+```bash
+#!/bin/bash
+set -e
+
+# Clone the repository and enter it
+git clone https://github.com/filmil/synod.git
+cd synod
+
+# Determine the base directory for state following XDG conventions
+STATE_BASE="${XDG_STATE_HOME:-$HOME/.local/state}/synod"
+
+# Create state directories for the 3 agents
+mkdir -p "$STATE_BASE/agent1"
+mkdir -p "$STATE_BASE/agent2"
+mkdir -p "$STATE_BASE/agent3"
+
+echo "Starting Agent 1 (Bootstrap)..."
+bazel run //cmd/agent -- \
+  --state_dir="$STATE_BASE/agent1" \
+  --grpc_addr=":50101" \
+  --http_addr=":8081" &
+PID1=$!
+
+# Give the first agent a moment to start
+sleep 3
+
+echo "Starting Agent 2..."
+bazel run //cmd/agent -- \
+  --state_dir="$STATE_BASE/agent2" \
+  --grpc_addr=":50102" \
+  --http_addr=":8082" \
+  --peer="127.0.0.1:50101" &
+PID2=$!
+
+echo "Starting Agent 3..."
+bazel run //cmd/agent -- \
+  --state_dir="$STATE_BASE/agent3" \
+  --grpc_addr=":50103" \
+  --http_addr=":8083" \
+  --peer="127.0.0.1:50101" &
+PID3=$!
+
+echo ""
+echo "Cluster is running! Press Ctrl+C to stop."
+echo "View Agent 1: http://localhost:8081"
+echo "View Agent 2: http://localhost:8082"
+echo "View Agent 3: http://localhost:8083"
+echo ""
+
+# Wait for all background processes
+wait $PID1 $PID2 $PID3
+```
 
 ## Features & Current State
 - **Key-Value Store:** Implements standard Paxos consensus bound to unix-path keys (e.g. `/system/config`).
