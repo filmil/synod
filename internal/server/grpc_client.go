@@ -47,6 +47,10 @@ func (c *PaxosClient) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryReq
 	return c.client.GetKVEntry(ctx, req)
 }
 
+func (c *PaxosClient) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error) {
+	return c.client.Ping(ctx, req)
+}
+
 func (c *PaxosClient) AgentID() string {
 	return c.agentID
 }

@@ -83,8 +83,22 @@ func (s *PaxosServer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryReq
 	}, nil
 }
 
-func RunGRPCServer(lis net.Listener, srv *PaxosServer) error {
+func (s *PaxosServer) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error) {
+	return &paxosv1.PingResponse{
+		AgentId: s.agentID,
+		Nonce:   req.Nonce,
+	}, nil
+}
+
+func RunGRPCServer(ctx context.Context, lis net.Listener, srv *PaxosServer) error {
 	s := grpc.NewServer()
 	paxosv1.RegisterPaxosServiceServer(s, srv)
+
+	go func() {
+		<-ctx.Done()
+		glog.Infof("gRPC server: shutting down")
+		s.Stop()
+	}()
+
 	return s.Serve(lis)
 }

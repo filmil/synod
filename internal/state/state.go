@@ -237,6 +237,14 @@ func (s *Store) AddMember(agentID string, info PeerInfo) error {
 	return nil
 }
 
+func (s *Store) RemoveMember(agentID string) error {
+	_, err := s.db.Exec("DELETE FROM membership WHERE agent_id = ?", agentID)
+	if err != nil {
+		return fmt.Errorf("failed to remove member: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) GetMembers() (map[string]PeerInfo, error) {
 	rows, err := s.db.Query("SELECT agent_id, address FROM membership")
 	if err != nil {

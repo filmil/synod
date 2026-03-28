@@ -211,13 +211,14 @@ func TestIntegration_5Agents(t *testing.T) {
 }
 
 type agentInstance struct {
-	id       string
-	grpcAddr string
-	httpURL  string
-	dir      string
-	store    *state.Store
-	cell     *paxos.Cell
-	srv      *server.PaxosServer
+	id         string
+	grpcAddr   string
+	httpURL    string
+	dir        string
+	store      *state.Store
+	cell       *paxos.Cell
+	srv        *server.PaxosServer
+	cancelFunc context.CancelFunc
 }
 
 func newAgentInstance(t *testing.T, id, dir, addr string) *agentInstance {
@@ -244,6 +245,9 @@ func newAgentInstance(t *testing.T, id, dir, addr string) *agentInstance {
 }
 
 func (a *agentInstance) run() {
+	ctx, cancel := context.WithCancel(context.Background())
+	a.cancelFunc = cancel
+
 	grpcLis, err := server.ListenWithRetry("127.0.0.1:0")
 	if err != nil {
 		glog.Errorf("failed to listen gRPC: %v", err)
@@ -259,9 +263,22 @@ func (a *agentInstance) run() {
 	a.httpURL = fmt.Sprintf("http://%s", httpLis.Addr().String())
 
 	go func() {
-		server.RunGRPCServer(grpcLis, a.srv)
+		server.RunGRPCServer(ctx, grpcLis, a.srv)
 	}()
 
-	httpSrv := server.NewHTTPServer(a.httpURL, a.store, a.cell)
-	httpSrv.Run(httpLis)
+	go func() {
+		httpSrv := server.NewHTTPServer(a.httpURL, a.store, a.cell)
+		httpSrv.Run(httpLis)
+	}()
+
+	<-ctx.Done()
+	grpcLis.Close()
+	httpLis.Close()
+}
+
+func (a *agentInstance) stop() {
+	if a.cancelFunc != nil {
+		a.cancelFunc()
+	}
+	a.store.Close()
 }

@@ -26,7 +26,10 @@ func (m *mockPeer) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*p
 	if m.err != nil {
 		return nil, m.err
 	}
-	return m.prepareResp, nil
+	if m.prepareResp != nil {
+		return m.prepareResp, nil
+	}
+	return &paxosv1.PromiseResponse{Promised: true, AgentId: m.agentID}, nil
 }
 
 func (m *mockPeer) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*paxosv1.AcceptedResponse, error) {
@@ -36,7 +39,10 @@ func (m *mockPeer) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 	if m.err != nil {
 		return nil, m.err
 	}
-	return m.acceptResp, nil
+	if m.acceptResp != nil {
+		return m.acceptResp, nil
+	}
+	return &paxosv1.AcceptedResponse{Accepted: true, AgentId: m.agentID}, nil
 }
 
 func (m *mockPeer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error) {
@@ -49,6 +55,10 @@ func (m *mockPeer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1
 
 func (m *mockPeer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error) {
 	return nil, nil
+}
+
+func (m *mockPeer) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error) {
+	return nil, m.err
 }
 
 func (m *mockPeer) AgentID() string {
