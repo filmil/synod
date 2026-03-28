@@ -1,0 +1,47 @@
+name: Release Agent
+
+on:
+  schedule:
+    # Run automatically once a month (1st of the month at 00:00 UTC)
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for fetching tags
+
+      - name: Setup Bazel
+        # Bazelisk is pre-installed on GitHub-hosted runners
+        run: bazel version
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: minor
+          release_branches: main
+
+      - name: Build Agent Binary
+        run: bazel build -c opt //cmd/agent
+
+      - name: Prepare Artifact
+        run: |
+          cp bazel-bin/cmd/agent/agent_/agent synod-agent-linux-amd64
+          chmod +x synod-agent-linux-amd64
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          files: synod-agent-linux-amd64
+          generate_release_notes: true

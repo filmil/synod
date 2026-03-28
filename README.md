@@ -1,6 +1,7 @@
 # Synod Paxos Agent
 
 [![Build and Test](https://github.com/filmil/synod/actions/workflows/build-test.yml/badge.svg)](https://github.com/filmil/synod/actions/workflows/build-test.yml)
+[![Release Agent](https://github.com/filmil/synod/actions/workflows/release.yml/badge.svg)](https://github.com/filmil/synod/actions/workflows/release.yml)
 
 Synod is a distributed Paxos coordination agent implemented in Go, managing a synchronized Key-Value store across dynamically joining network peers.
 
