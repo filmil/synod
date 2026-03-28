@@ -32,11 +32,15 @@ message ProposalID {
 message PingRequest {
   string agent_id = 1;
   string nonce = 2;
+  string host_port = 3;
+  string http_url = 4;
 }
 
 message PingResponse {
   string agent_id = 1;
   string nonce = 2;
+  string host_port = 3;
+  string http_url = 4;
 }
 
 message PrepareRequest {
@@ -81,6 +85,8 @@ message JoinClusterResponse {
 
 message SyncRequest {
   string agent_id = 1;
+  string host_port = 2;
+  string http_url = 3;
 }
 
 message SyncResponse {

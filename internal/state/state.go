@@ -217,8 +217,6 @@ func (s *Store) SetAcceptedValue(key string, id *paxosv1.ProposalID, value []byt
 }
 
 type PeerInfo struct {
-	GRPCAddr  string `json:"grpc_addr"`
-	HTTPURL   string `json:"http_url"`
 	ShortName string `json:"short_name"`
 }
 
@@ -259,9 +257,9 @@ func (s *Store) GetMembers() (map[string]PeerInfo, error) {
 			return nil, err
 		}
 		var info PeerInfo
-		// Fallback for old data where address was just a plain string
 		if err := json.Unmarshal([]byte(infoStr), &info); err != nil {
-			info = PeerInfo{GRPCAddr: infoStr, ShortName: "Unknown"}
+			// Fallback if it was just a string (though it shouldn't be anymore)
+			info = PeerInfo{ShortName: "Unknown"}
 		}
 		members[id] = info
 	}

@@ -25,6 +25,7 @@
 - Don't use `glog.Fatalf`, instead log at `glog.Errof` and call `os.Exit` instead.
 - Find and save LICENSE for all dirs in //third_party
 - Use "Conventional Commits 1.0.0" when creating commits.
+- Format all Markdown files to 80 columns.
 - When starting new work:
   - create a new git branch.
   - Git pull from main to ensure you are reasonably up to date. Use the `gh`
@@ -172,18 +173,18 @@
 
 #### Update P.4
 
-* Make a new feature: when printing JSON and proto, order fields lexicographically by name.
-* When printing maps, order the entries lexicographically by the string representation of the key.
+- Make a new feature: when printing JSON and proto, order fields lexicographically by name.
+- When printing maps, order the entries lexicographically by the string representation of the key.
 
 ### Safety
 
 #### Update S.1: exponential backoff
 
-* Modify all retriable operations to use exponential backoff: start with a small
+- Modify all retriable operations to use exponential backoff: start with a small
   timeout, such as 100ms, each next retry is twice as long as the previous.
-  * Start by creating a "exponential backoff" module, write tests for its
+  - Start by creating a "exponential backoff" module, write tests for its
     behavior, then insert it wherever there are now timed waits.
-  * Put in a verbose log line at every decision point in the retry.
+  - Put in a verbose log line at every decision point in the retry.
 
 ## Bugs
 
@@ -196,7 +197,8 @@ The 'api/command' page is rendered as text, not as HTML, fix.
 Since peers can go away and come back, do not persist the gRPC and HTTP port
 info for peers.
 
-* Remove the gRPC and HTTP port info from the `/_internal/peers` key, and keep
-  that information in a separate map which is not persisted.
-* Key peers by their UUID. This is not safe, but we will handle safety later.
-
+- Remove the gRPC and HTTP port info from the `/_internal/peers` key, and keep
+  that information in a separate, "ephemeral" map which is not persisted.
+- Key peers by their UUID. This is not safe, but we will handle safety later.
+- Do not remove this info from the HTTP display, only source them from the
+  ephemeral map.

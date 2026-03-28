@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sync"
 
+	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 	"github.com/google/uuid"
-	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 )
 
 type Proposer struct {
@@ -37,7 +37,7 @@ func (p *Proposer) Propose(ctx context.Context, key string, value []byte) ([]byt
 	p.mu.Unlock()
 
 	nonce := uuid.New().String()
-	glog.Infof("Proposer(%s): Starting proposal for key %s, proposal %v, nonce %s", 
+	glog.Infof("Proposer(%s): Starting proposal for key %s, proposal %v, nonce %s",
 		p.agentID, key, proposalID, nonce)
 
 	// Phase 1: Prepare

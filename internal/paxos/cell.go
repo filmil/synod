@@ -33,27 +33,82 @@ type PeerClient interface {
 
 type PeerFactory func(agentID, address string) (PeerClient, error)
 
+type ConnectionInfo struct {
+	GRPCAddr string
+	HTTPURL  string
+}
+
 type Cell struct {
 	agentID  string
 	store    *state.Store
 	acceptor *Acceptor
 	proposer *Proposer
 
-	mu          sync.Mutex
-	peers       map[string]PeerClient
-	peerFactory PeerFactory
+	mu             sync.Mutex
+	peers          map[string]PeerClient
+	ephemeralPeers map[string]ConnectionInfo // Key: AgentID (UUID)
+	peerFactory    PeerFactory
+
+	selfGRPCAddr string
+	selfHTTPURL  string
 }
 
-func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory PeerFactory) *Cell {
+func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory PeerFactory, selfGRPCAddr, selfHTTPURL string) *Cell {
 	c := &Cell{
-		agentID:     agentID,
-		store:       store,
-		acceptor:    acceptor,
-		peers:       make(map[string]PeerClient),
-		peerFactory: factory,
+		agentID:        agentID,
+		store:          store,
+		acceptor:       acceptor,
+		peers:          make(map[string]PeerClient),
+		ephemeralPeers: make(map[string]ConnectionInfo),
+		peerFactory:    factory,
+		selfGRPCAddr:   selfGRPCAddr,
+		selfHTTPURL:    selfHTTPURL,
+	}
+	if selfGRPCAddr != "" || selfHTTPURL != "" {
+		c.ephemeralPeers[agentID] = ConnectionInfo{
+			GRPCAddr: selfGRPCAddr,
+			HTTPURL:  selfHTTPURL,
+		}
 	}
 	c.proposer = NewProposer(agentID, nil, acceptor)
 	return c
+}
+
+func (c *Cell) SetSelfAddress(grpcAddr, httpURL string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.selfGRPCAddr = grpcAddr
+	c.selfHTTPURL = httpURL
+	c.ephemeralPeers[c.agentID] = ConnectionInfo{
+		GRPCAddr: grpcAddr,
+		HTTPURL:  httpURL,
+	}
+}
+
+func (c *Cell) UpdateEphemeralPeer(agentID, grpcAddr, httpURL string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ephemeralPeers[agentID] = ConnectionInfo{
+		GRPCAddr: grpcAddr,
+		HTTPURL:  httpURL,
+	}
+}
+
+func (c *Cell) GetEphemeralPeers() map[string]ConnectionInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	res := make(map[string]ConnectionInfo)
+	for k, v := range c.ephemeralPeers {
+		res[k] = v
+	}
+	return res
+}
+
+func (c *Cell) GetEphemeralPeer(agentID string) (ConnectionInfo, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	info, ok := c.ephemeralPeers[agentID]
+	return info, ok
 }
 
 func (c *Cell) SetPeers(peers []PeerClient) {
@@ -258,7 +313,7 @@ func (c *Cell) refreshPeers(ctx context.Context) {
 	newPeers := make(map[string]PeerClient)
 	var peerList []PeerClient
 
-	for id, info := range members {
+	for id := range members {
 		if id == c.agentID {
 			continue
 		}
@@ -266,14 +321,16 @@ func (c *Cell) refreshPeers(ctx context.Context) {
 			newPeers[id] = p
 			peerList = append(peerList, p)
 		} else if c.peerFactory != nil {
-			glog.Infof("Cell(%s): Creating new client for peer %s at %s", c.agentID, id, info.GRPCAddr)
-			p, err := c.peerFactory(id, info.GRPCAddr)
-			if err != nil {
-				glog.Errorf("Cell(%s): Failed to create peer client for %s: %v", c.agentID, id, err)
-				continue
+			if eph, ok := c.ephemeralPeers[id]; ok {
+				glog.Infof("Cell(%s): Creating new client for peer %s at %s", c.agentID, id, eph.GRPCAddr)
+				p, err := c.peerFactory(id, eph.GRPCAddr)
+				if err != nil {
+					glog.Errorf("Cell(%s): Failed to create peer client for %s: %v", c.agentID, id, err)
+					continue
+				}
+				newPeers[id] = p
+				peerList = append(peerList, p)
 			}
-			newPeers[id] = p
-			peerList = append(peerList, p)
 		}
 	}
 	c.peers = newPeers
@@ -325,9 +382,11 @@ func (c *Cell) PingPeers(ctx context.Context) {
 		nonce := uuid.New().String()
 		pingCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 		glog.V(2).Infof("Cell(%s): Pinging peer %s", c.agentID, p.AgentID())
-		_, err := p.Ping(pingCtx, &paxosv1.PingRequest{
-			AgentId: c.agentID,
-			Nonce:   nonce,
+		resp, err := p.Ping(pingCtx, &paxosv1.PingRequest{
+			AgentId:  c.agentID,
+			Nonce:    nonce,
+			HostPort: c.selfGRPCAddr,
+			HttpUrl:  c.selfHTTPURL,
 		})
 		cancel()
 		if err != nil {
@@ -335,6 +394,9 @@ func (c *Cell) PingPeers(ctx context.Context) {
 			if err := c.ProposeRemoval(ctx, p.AgentID()); err != nil {
 				glog.Errorf("Cell(%s): Failed to propose removal of peer %s: %v", c.agentID, p.AgentID(), err)
 			}
+		} else {
+			// Update ephemeral map from response
+			c.UpdateEphemeralPeer(resp.AgentId, resp.HostPort, resp.HttpUrl)
 		}
 	}
 }
@@ -357,7 +419,9 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 
 	for _, p := range peers {
 		resp, err := p.Sync(ctx, &paxosv1.SyncRequest{
-			AgentId: c.agentID,
+			AgentId:  c.agentID,
+			HostPort: c.selfGRPCAddr,
+			HttpUrl:  c.selfHTTPURL,
 		})
 		if err != nil {
 			continue

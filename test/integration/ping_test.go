@@ -37,8 +37,6 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 	// Bootstrap the cluster
 	addr0 := agents[0].grpcAddr
 	info0 := state.PeerInfo{
-		GRPCAddr:  addr0,
-		HTTPURL:   agents[0].httpURL,
 		ShortName: "agent-0",
 	}
 	agents[0].store.AddMember("agent-0", info0)
@@ -46,12 +44,10 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 
 	for i := 1; i < numAgents; i++ {
 		infoI := state.PeerInfo{
-			GRPCAddr:  agents[i].grpcAddr,
-			HTTPURL:   agents[i].httpURL,
 			ShortName: fmt.Sprintf("agent-%d", i),
 		}
 		agents[i].store.AddMember(agents[i].id, infoI)
-		
+
 		// Join via agent-0
 		client, _ := server.NewPaxosClient("temp-joiner", addr0)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -59,17 +55,21 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 			AgentId:   agents[i].id,
 			HostPort:  agents[i].grpcAddr,
 			ShortName: infoI.ShortName,
-			HttpUrl:   infoI.HTTPURL,
+			HttpUrl:   agents[i].httpURL,
 		})
 		cancel()
-		
+
 		// Set membership for new agent so it can sync
 		kvResp, _ := client.GetKVEntry(context.Background(), &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
 		agents[i].store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: "agent-0"}, kvResp.Value)
 		agents[i].store.CommitKV("/_internal/peers", kvResp.Value, "membership", kvResp.Version)
 		agents[i].cell.ApplyMembershipChange(kvResp.Value)
+
+		// Add agent-0 to ephemeral map so we can talk to it
+		agents[i].cell.UpdateEphemeralPeer("agent-0", addr0, agents[0].httpURL)
+
 		client.Close()
-		
+
 		// Propose the new agent to the cluster
 		agents[0].cell.ProposeMembership(context.Background(), agents[i].id, infoI)
 	}
@@ -105,7 +105,7 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 	if _, ok := members["agent-2"]; ok {
 		t.Errorf("Unresponsive agent-2 was not removed from agent-0's membership")
 	}
-	
+
 	// Verify agent-2 is gone from agent-1's view
 	members, _ = agents[1].store.GetMembers()
 	if _, ok := members["agent-2"]; ok {
