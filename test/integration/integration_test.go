@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
@@ -144,6 +145,27 @@ func TestIntegration_5Agents(t *testing.T) {
 		}
 		if string(val) != "exit" {
 			t.Errorf("Agent %d: expected 'exit' for /app/state, got '%s' (type %s)", i, string(val), valType)
+		}
+
+		// Verify that all 5 agents are mentioned in /_internal/peers
+		peerVal, _, _, _, getErr := agents[i].store.GetKVEntry("/_internal/peers")
+		if getErr != nil {
+			t.Errorf("Agent %d: failed to get KV entry for /_internal/peers: %v", i, getErr)
+			continue
+		}
+		var peers map[string]state.PeerInfo
+		if err := json.Unmarshal(peerVal, &peers); err != nil {
+			t.Errorf("Agent %d: failed to unmarshal peers: %v", i, err)
+			continue
+		}
+		if len(peers) != numAgents {
+			t.Errorf("Agent %d: expected %d peers, got %d", i, numAgents, len(peers))
+		}
+		for j := 0; j < numAgents; j++ {
+			expectedID := fmt.Sprintf("agent-%d", j)
+			if _, ok := peers[expectedID]; !ok {
+				t.Errorf("Agent %d: missing expected peer %s", i, expectedID)
+			}
 		}
 	}
 }
