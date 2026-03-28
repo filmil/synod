@@ -6,6 +6,8 @@ import (
 	"html"
 	"net"
 	"net/http"
+	"runtime"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +38,7 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	mux.HandleFunc("/messages", s.handleMessages)
 	mux.HandleFunc("/peers", s.handlePeers)
 	mux.HandleFunc("/store", s.handleStore)
+	mux.HandleFunc("/system", s.handleSystem)
 	mux.HandleFunc("/api/command", s.handleCommand)
 
 	// Serve locally saved bootstrap via runfiles
@@ -92,6 +95,7 @@ func (s *HTTPServer) renderHeader(w http.ResponseWriter, title, agentName, activ
             <li class="nav-item"><a class="nav-link %s" href="/store">KV Store</a></li>
             <li class="nav-item"><a class="nav-link %s" href="/messages">Messages</a></li>
             <li class="nav-item"><a class="nav-link %s" href="/peers">Peers</a></li>
+            <li class="nav-item"><a class="nav-link %s" href="/system">System</a></li>
           </ul>
           <div class="dropdown">
             <button class="btn btn-outline-light dropdown-toggle btn-sm" type="button" id="reloadDropdown" data-bs-toggle="dropdown" aria-expanded="false">
@@ -118,7 +122,8 @@ func (s *HTTPServer) renderHeader(w http.ResponseWriter, title, agentName, activ
 		s.activeClass(activeNav, "status"),
 		s.activeClass(activeNav, "store"),
 		s.activeClass(activeNav, "messages"),
-		s.activeClass(activeNav, "peers"))
+		s.activeClass(activeNav, "peers"),
+		s.activeClass(activeNav, "system"))
 }
 
 func (s *HTTPServer) activeClass(active, current string) string {
@@ -719,4 +724,75 @@ func prototextToTable(text string) string {
 	fields, _ := parsePT(lines, 0)
 	sortPTFields(fields)
 	return renderPTFields(fields)
+}
+
+func (s *HTTPServer) handleSystem(w http.ResponseWriter, r *http.Request) {
+	_, shortName, err := s.store.GetAgentID()
+	if err != nil {
+		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	numGoroutines := runtime.NumGoroutine()
+	numCPU := runtime.NumCPU()
+
+	s.renderHeader(w, "System Introspection", shortName, "system")
+
+	// Render runtime stats
+	fmt.Fprintf(w, `
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-info text-white">Go Runtime Statistics</div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <tbody>
+                <tr><th class="w-25">Available CPUs</th><td>%d</td></tr>
+                <tr><th>Active Goroutines</th><td>%d</td></tr>
+                <tr><th>Allocated Memory (Alloc)</th><td>%d bytes (%.2f MB)</td></tr>
+                <tr><th>Total Allocated (TotalAlloc)</th><td>%d bytes (%.2f MB)</td></tr>
+                <tr><th>System Memory (Sys)</th><td>%d bytes (%.2f MB)</td></tr>
+                <tr><th>Number of GCs</th><td>%d</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+	`,
+		numCPU,
+		numGoroutines,
+		m.Alloc, float64(m.Alloc)/(1024*1024),
+		m.TotalAlloc, float64(m.TotalAlloc)/(1024*1024),
+		m.Sys, float64(m.Sys)/(1024*1024),
+		m.NumGC)
+
+	// Check if a stack dump was requested
+	if r.URL.Query().Get("dump") == "goroutines" {
+		fmt.Fprintf(w, `
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-warning text-dark">
+          Goroutine Stack Dump
+          <a href="/system" class="btn btn-sm btn-outline-dark float-end">Clear Dump</a>
+        </div>
+        <div class="card-body">
+          <pre class="small bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto;"><code>`)
+
+		pprof.Lookup("goroutine").WriteTo(w, 1)
+
+		fmt.Fprintf(w, `</code></pre>
+        </div>
+      </div>`)
+	} else {
+		fmt.Fprintf(w, `
+      <div class="card shadow-sm mb-4 border-warning">
+        <div class="card-body text-center">
+          <p class="mb-3">Need to debug a deadlock or performance issue?</p>
+          <a href="/system?dump=goroutines" class="btn btn-warning">Generate Goroutine Stack Dump</a>
+        </div>
+      </div>`)
+	}
+
+	s.renderFooter(w)
 }
