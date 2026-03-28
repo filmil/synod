@@ -27,7 +27,9 @@
 * Use "Conventional Commits 1.0.0" when creating commits.
 * When starting new work:
   * create a new git branch.
-  * Git pull from main to ensure you are reasonably up to date.
+  * Git pull from main to ensure you are reasonably up to date. Use the `gh`
+    utility for creatign pull requests.
+    * Only create PRs against remote `main` branch.
 
 ### Update P.1
 
