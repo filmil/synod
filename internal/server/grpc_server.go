@@ -6,6 +6,7 @@ import (
 
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/state"
+	"github.com/filmil/synod/internal/userapi"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
@@ -13,10 +14,12 @@ import (
 
 type PaxosServer struct {
 	paxosv1.UnimplementedPaxosServiceServer
+	paxosv1.UnimplementedUserServiceServer
 	agentID  string
 	acceptor *paxos.Acceptor
 	store    *state.Store
 	cell     *paxos.Cell
+	userAPI  *userapi.UserAPI
 }
 
 func NewPaxosServer(agentID string, store *state.Store, acceptor *paxos.Acceptor, cell *paxos.Cell) *PaxosServer {
@@ -25,6 +28,7 @@ func NewPaxosServer(agentID string, store *state.Store, acceptor *paxos.Acceptor
 		acceptor: acceptor,
 		store:    store,
 		cell:     cell,
+		userAPI:  userapi.New(cell),
 	}
 }
 
@@ -117,9 +121,18 @@ func (s *PaxosServer) GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeer
 	return resp, nil
 }
 
+func (s *PaxosServer) Read(ctx context.Context, req *paxosv1.ReadRequest) (*paxosv1.ReadResponse, error) {
+	return s.userAPI.Read(ctx, req.Key, req.Quorum)
+}
+
+func (s *PaxosServer) CompareAndWrite(ctx context.Context, req *paxosv1.CompareAndWriteRequest) (*paxosv1.CompareAndWriteResponse, error) {
+	return s.userAPI.CompareAndWrite(ctx, req.Key, req.OldValue, req.NewValue)
+}
+
 func RunGRPCServer(ctx context.Context, lis net.Listener, srv *PaxosServer) error {
 	s := grpc.NewServer()
 	paxosv1.RegisterPaxosServiceServer(s, srv)
+	paxosv1.RegisterUserServiceServer(s, srv)
 
 	go func() {
 		<-ctx.Done()

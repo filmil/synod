@@ -6,6 +6,7 @@ import (
 	"html"
 	"net"
 	"net/http"
+	"net/url"
 	"runtime"
 	"runtime/pprof"
 	"sort"
@@ -15,6 +16,8 @@ import (
 	"github.com/bazelbuild/rules_go/go/runfiles"
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/state"
+	"github.com/filmil/synod/internal/userapi"
+	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 )
 
@@ -40,6 +43,9 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	mux.HandleFunc("/store", s.handleStore)
 	mux.HandleFunc("/system", s.handleSystem)
 	mux.HandleFunc("/api/command", s.handleCommand)
+	mux.HandleFunc("/userapi", s.handleUserAPI)
+	mux.HandleFunc("/api/user/read", s.handleUserAPIRead)
+	mux.HandleFunc("/api/user/write", s.handleUserAPIWrite)
 
 	// Serve locally saved bootstrap via runfiles
 	mux.HandleFunc("/static/bootstrap.min.css", func(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +101,7 @@ func (s *HTTPServer) renderHeader(w http.ResponseWriter, title, agentName, activ
             <li class="nav-item"><a class="nav-link %s" href="/store">KV Store</a></li>
             <li class="nav-item"><a class="nav-link %s" href="/messages">Messages</a></li>
             <li class="nav-item"><a class="nav-link %s" href="/peers">Peers</a></li>
+            <li class="nav-item"><a class="nav-link %s" href="/userapi">User API</a></li>
             <li class="nav-item"><a class="nav-link %s" href="/system">System</a></li>
           </ul>
           <div class="dropdown">
@@ -123,6 +130,7 @@ func (s *HTTPServer) renderHeader(w http.ResponseWriter, title, agentName, activ
 		s.activeClass(activeNav, "store"),
 		s.activeClass(activeNav, "messages"),
 		s.activeClass(activeNav, "peers"),
+		s.activeClass(activeNav, "userapi"),
 		s.activeClass(activeNav, "system"))
 }
 
@@ -795,4 +803,138 @@ func (s *HTTPServer) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.renderFooter(w)
+}
+
+func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
+	_, shortName, err := s.store.GetAgentID()
+	if err != nil {
+		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+
+	s.renderHeader(w, "User API", shortName, "userapi")
+
+	// Check for result flash message
+	statusMsg := ""
+	if r.URL.Query().Get("success") == "true" {
+		statusMsg = `<div class="alert alert-success mb-4" role="alert">Operation completed successfully.</div>`
+	} else if errMsg := r.URL.Query().Get("error"); errMsg != "" {
+		statusMsg = fmt.Sprintf(`<div class="alert alert-danger mb-4" role="alert">Operation failed: %s</div>`, html.EscapeString(errMsg))
+	} else if resultMsg := r.URL.Query().Get("result"); resultMsg != "" {
+		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert">Read Result: <code>%s</code></div>`, html.EscapeString(resultMsg))
+	}
+
+	fmt.Fprintf(w, `
+	  %s
+      <div class="row">
+        <div class="col-md-6">
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-primary text-white">Read Key</div>
+            <div class="card-body">
+              <form action="/api/user/read" method="post">
+                <div class="mb-3">
+                  <label class="form-label">Key path</label>
+                  <input type="text" name="key" class="form-control" placeholder="/foo/bar" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Quorum Requirement</label>
+                  <select name="quorum" class="form-select">
+                    <option value="LOCAL">Local (Current Peer Only)</option>
+                    <option value="MAJORITY" selected>Majority</option>
+                    <option value="ALL">All Peers</option>
+                  </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Execute Read</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        
+        <div class="col-md-6">
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-success text-white">Compare And Write</div>
+            <div class="card-body">
+              <form action="/api/user/write" method="post">
+                <div class="mb-3">
+                  <label class="form-label">Key path</label>
+                  <input type="text" name="key" class="form-control" placeholder="/foo/bar" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Expected Old Value</label>
+                  <input type="text" name="old_value" class="form-control" placeholder="old value">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">New Value</label>
+                  <input type="text" name="new_value" class="form-control" placeholder="new value" required>
+                </div>
+                <button type="submit" class="btn btn-success">Execute CompareAndWrite</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+	`, statusMsg)
+
+	s.renderFooter(w)
+}
+
+func (s *HTTPServer) handleUserAPIRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
+		return
+	}
+
+	key := r.FormValue("key")
+	qStr := r.FormValue("quorum")
+
+	quorum := paxosv1.ReadQuorum_READ_QUORUM_UNSPECIFIED
+	switch qStr {
+	case "LOCAL":
+		quorum = paxosv1.ReadQuorum_READ_QUORUM_LOCAL
+	case "MAJORITY":
+		quorum = paxosv1.ReadQuorum_READ_QUORUM_MAJORITY
+	case "ALL":
+		quorum = paxosv1.ReadQuorum_READ_QUORUM_ALL
+	}
+
+	userAPI := userapi.New(s.cell)
+	resp, err := userAPI.Read(r.Context(), key, quorum)
+
+	if err != nil {
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+
+	if resp == nil || resp.Value == nil {
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape("key not found"), http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/userapi?result="+url.QueryEscape(string(resp.Value)), http.StatusSeeOther)
+}
+
+func (s *HTTPServer) handleUserAPIWrite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
+		return
+	}
+
+	key := r.FormValue("key")
+	oldVal := r.FormValue("old_value")
+	newVal := r.FormValue("new_value")
+
+	userAPI := userapi.New(s.cell)
+	resp, err := userAPI.CompareAndWrite(r.Context(), key, []byte(oldVal), []byte(newVal))
+
+	if err != nil {
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+
+	if !resp.Success {
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(resp.Message), http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/userapi?success=true", http.StatusSeeOther)
 }
