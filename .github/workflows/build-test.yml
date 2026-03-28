@@ -19,9 +19,9 @@ jobs:
         path: |
           ~/.cache/bazel-disk-cache
           ~/.cache/bazel-repository-cache
-        key: ${{ runner.os }}-bazel-${{ hashFiles('MODULE.bazel.lock', 'go.sum') }}
+        key: ${{ runner.os }}-bazel-linux-amd64-${{ hashFiles('MODULE.bazel.lock', 'go.sum') }}
         restore-keys: |
-          ${{ runner.os }}-bazel-
+          ${{ runner.os }}-bazel-linux-amd64-
 
     - name: Set up Bazel
       uses: bazelbuild/setup-bazelisk@v3
