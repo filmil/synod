@@ -176,12 +176,14 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 
 		// Check if already correct
 		if existing, ok := peers[agentID]; ok && existing == info {
+			glog.V(2).Infof("Cell(%s): Membership for %s is already correct", c.agentID, agentID)
 			return nil
 		}
 
 		// Enforce cell-unique short name
 		for id, peerInfo := range peers {
 			if id != agentID && peerInfo.ShortName == info.ShortName {
+				glog.V(2).Infof("Cell(%s): Enforce cell-unique short name: name rejected %q is already taken", c.agentID, info.ShortName)
 				return fmt.Errorf("name rejected: short name %q is already taken", info.ShortName)
 			}
 		}
@@ -238,6 +240,7 @@ func (c *Cell) ProposeRemoval(ctx context.Context, agentID string) error {
 
 		// Check if already correct
 		if _, ok := peers[agentID]; !ok {
+			glog.V(2).Infof("Cell(%s): Peer %s is already removed", c.agentID, agentID)
 			return nil
 		}
 
@@ -520,7 +523,8 @@ func (c *Cell) syncMissingEndpoints(ctx context.Context) {
 	c.mu.Unlock()
 
 	if len(missing) == 0 || len(knownPeers) == 0 {
-		return // Nothing to do or no one to ask
+		glog.V(2).Infof("Cell(%s): EndpointSync: Nothing to do or no one to ask", c.agentID)
+		return
 	}
 
 	bo := backoff.New()

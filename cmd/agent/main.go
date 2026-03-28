@@ -156,7 +156,8 @@ func main() {
 					shortName = names.GenerateForIndex(index)
 					selfInfo.ShortName = shortName
 					store.SetShortName(shortName)
-					return fmt.Errorf("JoinCluster rejected: %s", resp.Message) // Returns error to trigger backoff retry
+					glog.V(2).Infof("Returns error to trigger backoff retry: JoinCluster rejected: %s", resp.Message)
+					return fmt.Errorf("JoinCluster rejected: %s", resp.Message)
 				}
 
 				glog.Infof("Successfully joined cluster via %s", resp.AgentId)
