@@ -1,0 +1,16 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "paxos",
+    srcs = [
+        "acceptor.go",
+        "proposer.go",
+    ],
+    importpath = "github.com/filmil/synod/internal/paxos",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/state:state",
+        "//proto/paxos/v1:paxos",
+        "@com_github_golang_glog//:glog",
+    ],
+)

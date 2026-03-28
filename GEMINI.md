@@ -49,3 +49,8 @@ Create the pull request, using in the pull request description a summary of all
 the commits between `origin/main` and the top of this branch that will be part
 of this pull request.
 
+## Maintenance rules
+
+* If README.md file does not exist, create one.
+* Add to README.md the status badges of the github workflows.
+* On major updates, update the README.md file with summary of features that exist.

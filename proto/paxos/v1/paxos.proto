@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package paxos.v1;
+
+option go_package = "github.com/filmil/synod/proto/paxos/v1;paxosv1";
+
+service PaxosService {
+  // Prepare a proposal.
+  rpc Prepare(PrepareRequest) returns (PromiseResponse) {}
+
+  // Accept a proposal.
+  rpc Accept(AcceptRequest) returns (AcceptedResponse) {}
+
+  // Request to join the cluster.
+  rpc JoinCluster(JoinClusterRequest) returns (JoinClusterResponse) {}
+
+  // Used for continuously syncing up the view of agent identities.
+  rpc Sync(SyncRequest) returns (SyncResponse) {}
+}
+
+message ProposalID {
+  uint64 number = 1;
+  string agent_id = 2;
+}
+
+message PrepareRequest {
+  ProposalID proposal_id = 1;
+  uint64 ledger_index = 2; // Which slot we are preparing for
+}
+
+message PromiseResponse {
+  bool promised = 1;
+  ProposalID highest_accepted_id = 2;
+  bytes highest_accepted_value = 3;
+}
+
+message AcceptRequest {
+  ProposalID proposal_id = 1;
+  uint64 ledger_index = 2;
+  bytes value = 3;
+}
+
+message AcceptedResponse {
+  bool accepted = 1;
+}
+
+message JoinClusterRequest {
+  string agent_id = 1;
+  string host_port = 2;
+}
+
+message JoinClusterResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message SyncRequest {
+  string agent_id = 1;
+  uint64 highest_ledger_index = 2;
+}
+
+message SyncResponse {
+  uint64 highest_ledger_index = 1;
+  repeated string agent_ids = 2; // Simplified sync response
+}

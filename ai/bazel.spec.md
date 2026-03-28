@@ -8,6 +8,7 @@
 * Configure the repository for use with protoc as a prebuilt bazel toolchain.
 * Configure the repository for use with grpc rules for bazel.
 * Configure the repository with github workflows for build and test.
+* Configure .bazelrc to load user.bazelrc if it exists.
 * Use `gh` to manipulate github.
 
 * When done, print out the stats on token use for the entire operation.
