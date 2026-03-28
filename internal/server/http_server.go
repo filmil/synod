@@ -558,7 +558,7 @@ func maybeJSONToTable(data []byte) string {
 
 	var obj interface{}
 	if err := json.Unmarshal(data, &obj); err != nil {
-		// Not JSON, return as plain text
+		glog.V(2).Infof("maybeJSONToTable: Not JSON, returning as plain text")
 		return fmt.Sprintf(`<pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>%s</code></pre>`, html.EscapeString(string(data)))
 	}
 
