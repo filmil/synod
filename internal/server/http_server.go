@@ -193,7 +193,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
-	_, shortName, err := s.store.GetAgentID()
+	agentID, shortName, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
@@ -202,6 +202,18 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to get recent messages", http.StatusInternalServerError)
 		return
+	}
+
+	val, _, _, _, err := s.store.GetKVEntry("/_internal/peers")
+	if err != nil {
+		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
+		return
+	}
+	members := make(map[string]state.PeerInfo)
+	if val != nil {
+		if err := json.Unmarshal(val, &members); err != nil {
+			glog.Errorf("Failed to unmarshal peers map: %v", err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -233,6 +245,51 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
     </nav>
     <div class="container">
       <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">Peer Mapping</div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <thead>
+                <tr>
+                  <th>Short Name</th><th>Agent ID</th><th>Endpoints</th>
+                </tr>
+              </thead>
+              <tbody>`, shortName, shortName)
+
+	var ids []string
+	for id := range members {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	for _, id := range ids {
+		info := members[id]
+		label := info.ShortName
+		if id == agentID {
+			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", label)
+		}
+		
+		endpoints := fmt.Sprintf("<code>%s</code>", info.GRPCAddr)
+		if info.HTTPURL != "" {
+			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
+		}
+		
+		fmt.Fprintf(w, `
+                <tr>
+                  <td>%s</td>
+                  <td><small class="text-muted">%s</small></td>
+                  <td>%s</td>
+                </tr>`, label, id, endpoints)
+	}
+
+	fmt.Fprintf(w, `
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm mb-4">
         <div class="card-header bg-secondary text-white">Recent Messages</div>
         <div class="card-body">
           <div class="table-responsive">
@@ -242,19 +299,28 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
                   <th>ID</th><th>Time</th><th>Type</th><th>Sender</th><th>Receiver</th><th>Request</th><th>Reply</th>
                 </tr>
               </thead>
-              <tbody>`, shortName, shortName)
+              <tbody>`)
 
 	for _, e := range entries {
+		senderName := e.Sender
+		if info, ok := members[e.Sender]; ok {
+			senderName = info.ShortName
+		}
+		receiverName := e.Receiver
+		if info, ok := members[e.Receiver]; ok {
+			receiverName = info.ShortName
+		}
+
 		fmt.Fprintf(w, `
                 <tr>
                   <td>%d</td>
                   <td><small class="text-nowrap">%s</small></td>
                   <td><span class="badge bg-info text-dark">%s</span></td>
-                  <td><small>%s</small></td>
-                  <td><small>%s</small></td>
+                  <td>%s</td>
+                  <td>%s</td>
                   <td><pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>%s</code></pre></td>
                   <td><pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>%s</code></pre></td>
-                </tr>`, e.ID, e.Timestamp, e.Type, e.Sender, e.Receiver, e.Message, e.Reply)
+                </tr>`, e.ID, e.Timestamp, e.Type, senderName, receiverName, e.Message, e.Reply)
 	}
 
 	fmt.Fprintf(w, `
