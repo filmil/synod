@@ -11,10 +11,10 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/state",
-        "//proto/paxos/v1:paxos",
+        "//proto/paxos/v1:paxosv1_go_proto",
         "@com_github_golang_glog//:glog",
         "@com_github_google_uuid//:uuid",
-        "@org_golang_google_protobuf//encoding/prototext:go_default_library",
+        "@org_golang_google_protobuf//encoding/prototext",
     ],
 )
 
@@ -28,5 +28,6 @@ go_test(
     embed = [":paxos"],
     deps = [
         "//internal/state",
+        "//proto/paxos/v1:paxosv1_go_proto",
     ],
 )

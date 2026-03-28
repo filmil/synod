@@ -1,1 +1,0 @@
-../../../bazel-bin/proto/paxos/v1/paxosv1_go_proto_/github.com/filmil/synod/proto/paxos/v1/paxos.pb.go

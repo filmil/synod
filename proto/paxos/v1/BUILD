@@ -1,6 +1,5 @@
-load("@rules_go//go:def.bzl", "go_library")
-load("@rules_go//proto:def.bzl", "go_proto_library")
 load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load("@rules_go//proto:def.bzl", "go_proto_library")
 
 # gazelle:proto disable_global
 # gazelle:proto disable
@@ -20,12 +19,5 @@ go_proto_library(
     ],
     importpath = "github.com/filmil/synod/proto/paxos/v1",
     proto = ":paxosv1_proto",
-    visibility = ["//visibility:public"],
-)
-
-go_library(
-    name = "paxos",
-    embed = [":paxosv1_go_proto"],
-    importpath = "github.com/filmil/synod/proto/paxos/v1",
     visibility = ["//visibility:public"],
 )
