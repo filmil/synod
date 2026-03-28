@@ -6,6 +6,7 @@
 Synod is a distributed Paxos coordination agent implemented in Go, managing a synchronized Key-Value store across dynamically joining network peers.
 
 ## Features & Current State
+
 - **Key-Value Store:** Implements standard Paxos consensus bound to unix-path keys (e.g. `/system/config`).
 - **Persistence:** SQLite backed via `mattn/go-sqlite3`.
 - **Dynamic Membership:** Nodes can dynamically join the cluster via gRPC. Network membership itself is managed within the KV Store under the `/_internal/peers` key using optimistic concurrency/versioning.
@@ -21,6 +22,7 @@ Synod is a distributed Paxos coordination agent implemented in Go, managing a sy
 You can start the agent using Bazel. Ensure you provide it a local directory for the SQLite state.
 
 **Start the first agent (bootstrap node):**
+
 ```bash
 bazel run //cmd/agent -- \
   --state_dir="$(pwd)/local/agent1" \
@@ -29,6 +31,7 @@ bazel run //cmd/agent -- \
 ```
 
 **Start a second agent and join the cluster:**
+
 ```bash
 bazel run //cmd/agent -- \
   --state_dir="$(pwd)/local/agent2" \

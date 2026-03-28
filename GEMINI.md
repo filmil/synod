@@ -1,4 +1,3 @@
-
 ## General change rules
 
 Do not change files in `//third_party` without user's explicit permission.
@@ -51,7 +50,7 @@ of this pull request.
 
 ## Maintenance rules
 
-* If README.md file does not exist, create one.
-* Add to README.md the status badges of the github workflows.
-* On major updates, update the README.md file with summary of features that exist.
-* Format all Markdown files you touch to 80 columns.
+- If README.md file does not exist, create one.
+- Add to README.md the status badges of the github workflows.
+- On major updates, update the README.md file with summary of features that exist.
+- Format all Markdown files you touch to 80 columns.
