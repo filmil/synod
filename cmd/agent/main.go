@@ -41,6 +41,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Ensure glog outputs to the state directory by default, 
+	// unless the user explicitly provided a log_dir flag.
+	logDirSet := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "log_dir" {
+			logDirSet = true
+		}
+	})
+	if !logDirSet {
+		flag.Set("log_dir", absStateDir)
+	}
+	
+	// Force glog to create the log files (if it hasn't already)
+	glog.CopyStandardLogTo("INFO")
+
 	store, err := state.NewStore(absStateDir)
 	if err != nil {
 		glog.Errorf("Failed to initialize state store: %v", err)
