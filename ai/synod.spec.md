@@ -187,6 +187,16 @@
 
 ## Bugs
 
-# B.1: /api/command
+### B.1: /api/command
 
 The 'api/command' page is rendered as text, not as HTML, fix.
+
+### B.2: do not persist port info for peers
+
+Since peers can go away and come back, do not persist the gRPC and HTTP port
+info for peers.
+
+* Remove the gRPC and HTTP port info from the `/_internal/peers` key, and keep
+  that information in a separate map which is not persisted.
+* Key peers by their UUID. This is not safe, but we will handle safety later.
+
