@@ -188,6 +188,17 @@
     behavior, then insert it wherever there are now timed waits.
   - Put in a verbose log line at every decision point in the retry.
 
+#### Update S.2: peer endpoints
+
+- Introduce a separate goroutine which looks at known peers, and if any of them
+  do not have known endpoints:
+  - Selects at random one peer whose endpoint is known to ask about missing
+    endpoint.
+  - On successful attempt, update the local view of the peers and continue
+    to wait.
+  - In case of failure, exponentially back off, and retry.
+- Modify the gRPC API to provide this API.
+
 ## Bugs
 
 ### B.1: /api/command

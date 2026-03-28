@@ -69,6 +69,11 @@ func (m *mockPeer) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1
 	}, nil
 }
 
+func (m *mockPeer) GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeerEndpointsRequest) (*paxosv1.GetPeerEndpointsResponse, error) {
+	return &paxosv1.GetPeerEndpointsResponse{
+		Endpoints: make(map[string]*paxosv1.EndpointInfo),
+	}, nil
+}
 func (m *mockPeer) AgentID() string {
 	return m.agentID
 }

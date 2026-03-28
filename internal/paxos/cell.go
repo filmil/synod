@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -28,6 +29,7 @@ type PeerClient interface {
 	Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error)
 	GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error)
 	Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error)
+	GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeerEndpointsRequest) (*paxosv1.GetPeerEndpointsResponse, error)
 	AgentID() string
 }
 
@@ -476,4 +478,84 @@ func (c *Cell) GetSyncState() (map[string]uint64, error) {
 		return nil, fmt.Errorf("failed to get KV state: %w", err)
 	}
 	return keys, nil
+}
+
+func (c *Cell) StartEndpointSyncLoop(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				c.syncMissingEndpoints(ctx)
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+}
+
+func (c *Cell) syncMissingEndpoints(ctx context.Context) {
+	members, err := c.store.GetMembers()
+	if err != nil {
+		glog.Errorf("Cell(%s): EndpointSync: Failed to get members: %v", c.agentID, err)
+		return
+	}
+
+	c.mu.Lock()
+	var missing []string
+	var knownPeers []PeerClient
+
+	for id := range members {
+		if id == c.agentID {
+			continue
+		}
+		if _, ok := c.ephemeralPeers[id]; !ok {
+			missing = append(missing, id)
+		}
+		if p, ok := c.peers[id]; ok {
+			knownPeers = append(knownPeers, p)
+		}
+	}
+	c.mu.Unlock()
+
+	if len(missing) == 0 || len(knownPeers) == 0 {
+		return // Nothing to do or no one to ask
+	}
+
+	bo := backoff.New()
+	bo.MaxElapsedTime = 5 * time.Minute
+
+	bo.Retry(ctx, "SyncEndpoints", func() error {
+		// Pick a random known peer
+		// (rand is seeded globally)
+		targetPeer := knownPeers[rand.Intn(len(knownPeers))]
+
+		glog.V(2).Infof("Cell(%s): EndpointSync: Asking %s for endpoints of %v", c.agentID, targetPeer.AgentID(), missing)
+
+		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		resp, err := targetPeer.GetPeerEndpoints(reqCtx, &paxosv1.GetPeerEndpointsRequest{
+			AgentId: c.agentID,
+		})
+
+		if err != nil {
+			return fmt.Errorf("failed to get endpoints from %s: %w", targetPeer.AgentID(), err)
+		}
+
+		foundAny := false
+		for missingID, info := range resp.Endpoints {
+			if info.HostPort != "" {
+				c.UpdateEphemeralPeer(missingID, info.HostPort, info.HttpUrl)
+				glog.Infof("Cell(%s): EndpointSync: Discovered endpoints for %s via %s: %s", c.agentID, missingID, targetPeer.AgentID(), info.HostPort)
+				foundAny = true
+			}
+		}
+
+		if !foundAny {
+			return fmt.Errorf("no missing endpoints were resolved by %s", targetPeer.AgentID())
+		}
+		return nil
+	})
 }

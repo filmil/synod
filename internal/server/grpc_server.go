@@ -102,6 +102,21 @@ func (s *PaxosServer) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxo
 	}, nil
 }
 
+func (s *PaxosServer) GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeerEndpointsRequest) (*paxosv1.GetPeerEndpointsResponse, error) {
+	resp := &paxosv1.GetPeerEndpointsResponse{
+		Endpoints: make(map[string]*paxosv1.EndpointInfo),
+	}
+
+	ephs := s.cell.GetEphemeralPeers()
+	for id, info := range ephs {
+		resp.Endpoints[id] = &paxosv1.EndpointInfo{
+			HostPort: info.GRPCAddr,
+			HttpUrl:  info.HTTPURL,
+		}
+	}
+	return resp, nil
+}
+
 func RunGRPCServer(ctx context.Context, lis net.Listener, srv *PaxosServer) error {
 	s := grpc.NewServer()
 	paxosv1.RegisterPaxosServiceServer(s, srv)

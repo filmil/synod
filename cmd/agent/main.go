@@ -214,6 +214,9 @@ func main() {
 	// Start ping loop
 	cell.StartPingLoop(context.Background(), *pingInterval)
 
+	// Start endpoint sync loop
+	cell.StartEndpointSyncLoop(context.Background(), 30*time.Second)
+
 	// Run servers
 	errChan := make(chan error, 2)
 	ctx := context.Background()
