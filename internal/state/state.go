@@ -206,6 +206,14 @@ func (s *Store) GetHighestLedgerIndex() (uint64, error) {
 	return uint64(nullIndex.Int64), nil
 }
 
+func (s *Store) GetLedgerEntry(index uint64) (value []byte, valType string, err error) {
+	err = s.db.QueryRow("SELECT value, type FROM ledger WHERE ledger_index = ?", index).Scan(&value, &valType)
+	if err == sql.ErrNoRows {
+		return nil, "", nil
+	}
+	return value, valType, err
+}
+
 func (s *Store) LogMessage(msgType, sender, receiver string, message, reply []byte) error {
 	_, err := s.db.Exec(`
 		INSERT INTO message_log (type, sender, receiver, message, reply)

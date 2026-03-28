@@ -10,12 +10,6 @@ import (
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 )
 
-type PeerClient interface {
-	Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*paxosv1.PromiseResponse, error)
-	Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*paxosv1.AcceptedResponse, error)
-	AgentID() string
-}
-
 type Proposer struct {
 	agentID  string
 	peers    []PeerClient

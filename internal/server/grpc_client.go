@@ -35,6 +35,18 @@ func (c *PaxosClient) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*
 	return c.client.Accept(ctx, req)
 }
 
+func (c *PaxosClient) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error) {
+	return c.client.JoinCluster(ctx, req)
+}
+
+func (c *PaxosClient) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error) {
+	return c.client.Sync(ctx, req)
+}
+
+func (c *PaxosClient) GetLedgerEntry(ctx context.Context, req *paxosv1.GetLedgerEntryRequest) (*paxosv1.GetLedgerEntryResponse, error) {
+	return c.client.GetLedgerEntry(ctx, req)
+}
+
 func (c *PaxosClient) AgentID() string {
 	return c.agentID
 }

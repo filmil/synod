@@ -7,5 +7,6 @@ go_test(
         "//internal/paxos",
         "//internal/server",
         "//internal/state",
+        "//proto/paxos/v1:paxos",
     ],
 )
