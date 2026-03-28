@@ -65,13 +65,100 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	return http.Serve(lis, mux)
 }
 
+func (s *HTTPServer) renderHeader(w http.ResponseWriter, title, agentName, activeNav string) {
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>%s - %s</title>
+    <link href="/static/bootstrap.min.css" rel="stylesheet">
+  </head>
+  <body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+      <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: %s</span>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+            <li class="nav-item"><a class="nav-link %s" href="/">Status</a></li>
+            <li class="nav-item"><a class="nav-link %s" href="/store">KV Store</a></li>
+            <li class="nav-item"><a class="nav-link %s" href="/messages">Messages</a></li>
+            <li class="nav-item"><a class="nav-link %s" href="/peers">Peers</a></li>
+          </ul>
+          <div class="dropdown">
+            <button class="btn btn-outline-light dropdown-toggle btn-sm" type="button" id="reloadDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+              Reload: <span id="reloadLabel">1m</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark" aria-labelledby="reloadDropdown">
+              <li><a class="dropdown-item" href="#" onclick="setReload(1000)">1s</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(10000)">10s</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(30000)">30s</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(60000)">1m</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(300000)">5m</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(600000)">10m</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(1200000)">20m</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(1800000)">30m</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(3600000)">1h</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(0)">Off</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </nav>
+    <div class="container">`, title, agentName, agentName,
+		s.activeClass(activeNav, "status"),
+		s.activeClass(activeNav, "store"),
+		s.activeClass(activeNav, "messages"),
+		s.activeClass(activeNav, "peers"))
+}
+
+func (s *HTTPServer) activeClass(active, current string) string {
+	if active == current {
+		return "active"
+	}
+	return ""
+}
+
+func (s *HTTPServer) renderFooter(w http.ResponseWriter) {
+	fmt.Fprintf(w, `
+    </div>
+    <script src="/static/bootstrap.bundle.min.js"></script>
+    <script>
+      function setReload(ms) {
+        localStorage.setItem('reloadInterval', ms);
+        location.reload();
+      }
+      (function() {
+        const ms = parseInt(localStorage.getItem('reloadInterval')) ?? 60000;
+        const labelMap = {
+          1000: '1s', 10000: '10s', 30000: '30s', 60000: '1m',
+          300000: '5m', 600000: '10m', 1200000: '20m', 1800000: '30m',
+          3600000: '1h', 0: 'Off'
+        };
+        const label = labelMap[ms] || (ms > 0 ? (ms/1000 + 's') : 'Off');
+        document.getElementById('reloadLabel').innerText = label;
+        if (ms > 0) {
+          setTimeout(() => location.reload(), ms);
+        }
+      })();
+    </script>
+  </body>
+</html>`)
+}
+
 func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	agentID, shortName, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
 	}
-	
+
 	val, _, _, _, err := s.store.GetKVEntry("/_internal/peers")
 	if err != nil {
 		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
@@ -90,34 +177,8 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html")
+	s.renderHeader(w, "Synod Agent", shortName, "status")
 	fmt.Fprintf(w, `
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Synod Agent - %s</title>
-    <link href="/static/bootstrap.min.css" rel="stylesheet">
-  </head>
-  <body class="bg-light">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-      <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: %s</span>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-            <li class="nav-item"><a class="nav-link active" href="/">Status</a></li>
-            <li class="nav-item"><a class="nav-link" href="/store">KV Store</a></li>
-            <li class="nav-item"><a class="nav-link" href="/messages">Messages</a></li>
-            <li class="nav-item"><a class="nav-link" href="/peers">Peers</a></li>
-          </ul>
-        </div>
-      </div>
-    </nav>
-    <div class="container">
       <div class="row">
         <div class="col-md-4">
           <div class="card shadow-sm mb-4">
@@ -138,7 +199,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
                   <thead>
                     <tr><th>Agent ID</th><th>Name</th><th>gRPC Address</th><th>HTTP Dashboard</th></tr>
                   </thead>
-                  <tbody>`, shortName, shortName, agentID, shortName, len(kvs))
+                  <tbody>`, agentID, shortName, len(kvs))
 
 	var ids []string
 	for id := range members {
@@ -185,11 +246,8 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
             </div>
           </div>
         </div>
-      </div>
-    </div>
-    <script src="/static/bootstrap.bundle.min.js"></script>
-  </body>
-</html>`)
+      </div>`)
+	s.renderFooter(w)
 }
 
 func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
@@ -216,34 +274,8 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "text/html")
+	s.renderHeader(w, "Messages", shortName, "messages")
 	fmt.Fprintf(w, `
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Synod Agent Messages - %s</title>
-    <link href="/static/bootstrap.min.css" rel="stylesheet">
-  </head>
-  <body class="bg-light">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-      <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: %s</span>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-            <li class="nav-item"><a class="nav-link" href="/">Status</a></li>
-            <li class="nav-item"><a class="nav-link" href="/store">KV Store</a></li>
-            <li class="nav-item"><a class="nav-link active" href="/messages">Messages</a></li>
-            <li class="nav-item"><a class="nav-link" href="/peers">Peers</a></li>
-          </ul>
-        </div>
-      </div>
-    </nav>
-    <div class="container">
       <div class="card shadow-sm mb-4">
         <div class="card-header bg-primary text-white">Peer Mapping</div>
         <div class="card-body">
@@ -254,7 +286,7 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
                   <th>Short Name</th><th>Agent ID</th><th>Endpoints</th>
                 </tr>
               </thead>
-              <tbody>`, shortName, shortName)
+              <tbody>`)
 
 	var ids []string
 	for id := range members {
@@ -268,12 +300,12 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 		if id == agentID {
 			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", label)
 		}
-		
+
 		endpoints := fmt.Sprintf("<code>%s</code>", info.GRPCAddr)
 		if info.HTTPURL != "" {
 			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
 		}
-		
+
 		fmt.Fprintf(w, `
                 <tr>
                   <td>%s</td>
@@ -328,11 +360,8 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
             </table>
           </div>
         </div>
-      </div>
-    </div>
-    <script src="/static/bootstrap.bundle.min.js"></script>
-  </body>
-</html>`)
+      </div>`)
+	s.renderFooter(w)
 }
 
 func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
@@ -341,7 +370,7 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
 	}
-	
+
 	val, _, _, _, err := s.store.GetKVEntry("/_internal/peers")
 	if err != nil {
 		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
@@ -355,34 +384,8 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "text/html")
+	s.renderHeader(w, "Peers", shortName, "peers")
 	fmt.Fprintf(w, `
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Synod Agent Peers - %s</title>
-    <link href="/static/bootstrap.min.css" rel="stylesheet">
-  </head>
-  <body class="bg-light">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-      <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: %s</span>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-            <li class="nav-item"><a class="nav-link" href="/">Status</a></li>
-            <li class="nav-item"><a class="nav-link" href="/store">KV Store</a></li>
-            <li class="nav-item"><a class="nav-link" href="/messages">Messages</a></li>
-            <li class="nav-item"><a class="nav-link active" href="/peers">Peers</a></li>
-          </ul>
-        </div>
-      </div>
-    </nav>
-    <div class="container">
       <div class="card shadow-sm mb-4">
         <div class="card-header bg-warning text-dark">Known Peers</div>
         <div class="card-body">
@@ -396,7 +399,7 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
                   <th>HTTP Dashboard</th>
                 </tr>
               </thead>
-              <tbody>`, shortName, shortName)
+              <tbody>`)
 
 	var ids []string
 	for id := range members {
@@ -429,11 +432,8 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
             </table>
           </div>
         </div>
-      </div>
-    </div>
-    <script src="/static/bootstrap.bundle.min.js"></script>
-  </body>
-</html>`)
+      </div>`)
+	s.renderFooter(w)
 }
 
 func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
@@ -448,34 +448,8 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html")
+	s.renderHeader(w, "KV Store", shortName, "store")
 	fmt.Fprintf(w, `
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Synod Agent KV Store - %s</title>
-    <link href="/static/bootstrap.min.css" rel="stylesheet">
-  </head>
-  <body class="bg-light">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-      <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: %s</span>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-            <li class="nav-item"><a class="nav-link" href="/">Status</a></li>
-            <li class="nav-item"><a class="nav-link active" href="/store">KV Store</a></li>
-            <li class="nav-item"><a class="nav-link" href="/messages">Messages</a></li>
-            <li class="nav-item"><a class="nav-link" href="/peers">Peers</a></li>
-          </ul>
-        </div>
-      </div>
-    </nav>
-    <div class="container">
       <div class="card shadow-sm mb-4">
         <div class="card-header bg-info text-white">Key-Value Store</div>
         <div class="card-body">
@@ -489,7 +463,7 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
                   <th>Version</th>
                 </tr>
               </thead>
-              <tbody>`, shortName, shortName)
+              <tbody>`)
 
 	for _, kv := range kvs {
 		fmt.Fprintf(w, `
@@ -506,11 +480,8 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
             </table>
           </div>
         </div>
-      </div>
-    </div>
-    <script src="/static/bootstrap.bundle.min.js"></script>
-  </body>
-</html>`)
+      </div>`)
+	s.renderFooter(w)
 }
 
 func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
@@ -518,7 +489,7 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	key := r.FormValue("key")
 	if key == "" {
 		http.Error(w, "Key is required", http.StatusBadRequest)
@@ -537,31 +508,15 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Paxos proposal failed: %v", err), http.StatusInternalServerError)
 		return
 	}
-	
-	w.Header().Set("Content-Type", "text/html")
+
+	_, shortName, _ := s.store.GetAgentID()
+	s.renderHeader(w, "Proposal Success", shortName, "")
 	fmt.Fprintf(w, `
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Synod Agent Proposal</title>
-    <link href="/static/bootstrap.min.css" rel="stylesheet">
-  </head>
-  <body class="bg-light">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-      <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Synod Paxos Agent</span>
-      </div>
-    </nav>
-    <div class="container">
       <div class="alert alert-success" role="alert">
         <h4 class="alert-heading">Success!</h4>
         <p>Consensus reached for key <code>%s</code> with value: <code>%s</code>.</p>
         <hr>
         <a href="/" class="btn btn-primary">Back to Status</a>
-      </div>
-    </div>
-  </body>
-</html>`, key, val)
+      </div>`, key, val)
+	s.renderFooter(w)
 }
