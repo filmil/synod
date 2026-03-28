@@ -1,13 +1,31 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 
 go_library(
     name = "names",
-    srcs = ["names.go"],
+    srcs = [
+        "names.go",
+        ":names_data",
+    ],
     importpath = "github.com/filmil/synod/internal/names",
     visibility = ["//visibility:public"],
-    data = ["names.txt"],
-    deps = [
-        "@com_github_golang_glog//:glog",
-        "@rules_go//go/runfiles:go_default_library",
-    ],
+)
+
+go_test(
+    name = "names_test",
+    srcs = ["names_test.go"],
+    embed = [":names"],
+)
+
+genrule(
+    name = "names_data",
+    srcs = ["//third_party/names:names.txt"],
+    outs = ["names_data.go"],
+    cmd = "$(location :gen) $< $@",
+    tools = [":gen"],
+)
+
+go_binary(
+    name = "gen",
+    srcs = ["gen/gen.go"],
+    visibility = ["//visibility:private"],
 )
