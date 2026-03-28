@@ -28,3 +28,4 @@ use_repo(
 # Protobuf already provides a default toolchain which uses prebuilt binaries.
 # To ensure it uses prebuilt, we can register the toolchain explicitly if needed,
 # but usually it's automatic.
+bazel_dep(name = "rules_android", version = "0.7.1")
