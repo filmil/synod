@@ -175,6 +175,11 @@
   If parsing is a success, then pretty print the JSON again as a hierarchical
   table.
 
+#### Update P.4
+
+* Make a new feature: when printing JSON and proto, order fields lexicographically by name.
+* When printing maps, order the entries lexicographically by the string representation of the key.
+
 ## Bugs
 
 # B.1: /api/command
