@@ -175,6 +175,16 @@
 * Make a new feature: when printing JSON and proto, order fields lexicographically by name.
 * When printing maps, order the entries lexicographically by the string representation of the key.
 
+### Safety
+
+#### Update S.1: exponential backoff
+
+* Modify all retriable operations to use exponential backoff: start with a small
+  timeout, such as 100ms, each next retry is twice as long as the previous.
+  * Start by creating a "exponential backoff" module, write tests for its
+    behavior, then insert it wherever there are now timed waits.
+  * Put in a verbose log line at every decision point in the retry.
+
 ## Bugs
 
 # B.1: /api/command
