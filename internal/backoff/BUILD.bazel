@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "backoff",
+    srcs = ["backoff.go"],
+    importpath = "github.com/filmil/synod/internal/backoff",
+    visibility = ["//visibility:public"],
+    deps = ["@com_github_golang_glog//:glog"],
+)
+
+go_test(
+    name = "backoff_test",
+    srcs = ["backoff_test.go"],
+    embed = [":backoff"],
+)

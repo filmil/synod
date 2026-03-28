@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/filmil/synod/internal/backoff"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
@@ -66,7 +67,10 @@ func (c *Cell) SetPeers(peers []PeerClient) {
 }
 
 func (c *Cell) Propose(ctx context.Context, key string, value []byte) error {
-	for {
+	bo := backoff.New()
+	bo.MaxElapsedTime = 2 * time.Minute
+
+	return bo.Retry(ctx, "Propose", func() error {
 		_, _, version, _, err := c.store.GetKVEntry(key)
 		if err != nil {
 			return fmt.Errorf("failed to get KV entry for %s: %w", key, err)
@@ -88,13 +92,17 @@ func (c *Cell) Propose(ctx context.Context, key string, value []byte) error {
 		if bytes.Equal(chosenValue, value) {
 			return nil
 		}
-		glog.Infof("Cell(%s): Value at %s was overwritten by someone else, retrying...", c.agentID, instanceKey)
-	}
+		glog.Infof("Cell(%s): Value at %s was overwritten by someone else, retrying via backoff...", c.agentID, instanceKey)
+		return fmt.Errorf("concurrent data update during proposal")
+	})
 }
 
 func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state.PeerInfo) error {
 	key := "/_internal/peers"
-	for {
+	bo := backoff.New()
+	bo.MaxElapsedTime = 2 * time.Minute
+
+	return bo.Retry(ctx, "ProposeMembership", func() error {
 		val, _, version, _, err := c.store.GetKVEntry(key)
 		if err != nil {
 			return fmt.Errorf("failed to get KV entry for peers: %w", err)
@@ -146,13 +154,17 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 		if bytes.Equal(chosenValue, newVal) {
 			return nil
 		}
-		glog.Infof("Cell(%s): Membership at %s was updated concurrently, retrying...", c.agentID, instanceKey)
-	}
+		glog.Infof("Cell(%s): Membership at %s was updated concurrently, retrying via backoff...", c.agentID, instanceKey)
+		return fmt.Errorf("concurrent membership update")
+	})
 }
 
 func (c *Cell) ProposeRemoval(ctx context.Context, agentID string) error {
 	key := "/_internal/peers"
-	for {
+	bo := backoff.New()
+	bo.MaxElapsedTime = 2 * time.Minute
+
+	return bo.Retry(ctx, "ProposeRemoval", func() error {
 		val, _, version, _, err := c.store.GetKVEntry(key)
 		if err != nil {
 			return fmt.Errorf("failed to get KV entry for peers: %w", err)
@@ -197,8 +209,9 @@ func (c *Cell) ProposeRemoval(ctx context.Context, agentID string) error {
 		if bytes.Equal(chosenValue, newVal) {
 			return nil
 		}
-		glog.Infof("Cell(%s): Membership at %s was updated concurrently, retrying...", c.agentID, instanceKey)
-	}
+		glog.Infof("Cell(%s): Membership at %s was updated concurrently, retrying via backoff...", c.agentID, instanceKey)
+		return fmt.Errorf("concurrent membership update during removal")
+	})
 }
 
 func (c *Cell) ApplyMembershipChange(value []byte) {
