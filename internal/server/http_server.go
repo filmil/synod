@@ -77,7 +77,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
 		return
 	}
-	members := make(map[string]string)
+	members := make(map[string]state.PeerInfo)
 	if val != nil {
 		if err := json.Unmarshal(val, &members); err != nil {
 			glog.Errorf("Failed to unmarshal peers map: %v", err)
@@ -136,7 +136,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
               <div class="table-responsive">
                 <table class="table table-hover">
                   <thead>
-                    <tr><th>Agent ID</th><th>Address & Name</th></tr>
+                    <tr><th>Agent ID</th><th>Name</th><th>gRPC Address</th><th>HTTP Dashboard</th></tr>
                   </thead>
                   <tbody>`, shortName, shortName, agentID, shortName, len(kvs))
 
@@ -151,7 +151,14 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		if id == agentID {
 			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", id)
 		}
-		fmt.Fprintf(w, "<tr><td><small>%s</small></td><td>%s</td></tr>", label, members[id])
+		info := members[id]
+		httpLink := ""
+		if info.HTTPURL != "" {
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
+		} else {
+			httpLink = "<span class=\"text-muted\">N/A</span>"
+		}
+		fmt.Fprintf(w, "<tr><td><small>%s</small></td><td>%s</td><td><code>%s</code></td><td>%s</td></tr>", label, info.ShortName, info.GRPCAddr, httpLink)
 	}
 
 	fmt.Fprintf(w, `
@@ -275,7 +282,7 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	members := make(map[string]string)
+	members := make(map[string]state.PeerInfo)
 	if val != nil {
 		if err := json.Unmarshal(val, &members); err != nil {
 			glog.Errorf("Failed to unmarshal peers map: %v", err)
@@ -318,7 +325,9 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
               <thead>
                 <tr>
                   <th>Agent ID</th>
-                  <th>Address & Name</th>
+                  <th>Name</th>
+                  <th>gRPC Address</th>
+                  <th>HTTP Dashboard</th>
                 </tr>
               </thead>
               <tbody>`, shortName, shortName)
@@ -332,12 +341,21 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(ids)
 
 	for _, id := range ids {
-		addr := members[id]
+		info := members[id]
+		grpcURL := fmt.Sprintf("grpc://%s", info.GRPCAddr)
+		httpLink := ""
+		if info.HTTPURL != "" {
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
+		} else {
+			httpLink = "<span class=\"text-muted\">N/A</span>"
+		}
 		fmt.Fprintf(w, `
                 <tr>
                   <td><code>%s</code></td>
                   <td>%s</td>
-                </tr>`, id, addr)
+                  <td><a href="%s" class="text-decoration-none">%s</a></td>
+                  <td>%s</td>
+                </tr>`, id, info.ShortName, grpcURL, grpcURL, httpLink)
 	}
 
 	fmt.Fprintf(w, `

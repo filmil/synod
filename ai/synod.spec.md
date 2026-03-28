@@ -23,6 +23,14 @@
 * Don't use `glog.Fatalf`, instead log at `glog.Errof` and call `os.Exit` instead.
 * Find and save LICENSE for all dirs in //third_party
 
+### Update P.1
+
+* When creating sql data schema, have a field for version. Whenever the
+  database schema changes, make sure to increment the expected version.
+* At startup compare the schema version in the database with the expected
+  version, in case of mismatch do not start.
+
+
 ## Requirements
 
 * Write a single agent binary which runs as a single agent in a Paxos
@@ -82,8 +90,9 @@
 
 * For each peer, adopt an identity which is a short human name.
   * Download 1000 names, roughly half male, half female to pick.
-  * Associate each UUID with a short cell-unique human name, and use that name
-    in all dashboards.
+  * Associate each UUID with a short cell-unique human name picked initially at
+    random from the list, and use that name in all dashboards.
+  * If name proposal is rejected, select a new name, and retry.
 
 ### Dynamic consensus
 
