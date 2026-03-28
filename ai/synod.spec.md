@@ -207,6 +207,69 @@
   - In case of failure, exponentially back off, and retry.
 - Modify the gRPC API to provide this API.
 
+### User API endpoints
+
+#### Feature A.1: Introduce user API
+
+- Introduce a new gRPC API endpoint, allowing the user to send commands to
+  the synod cell.
+- Implement operations in a library, do not allow operations to leak into
+  other parts of the code.
+- Operations are:
+  - Read: read the value of a specific key.
+    - Allow the user to specify a quorum option, one of:
+      - Read the value from just the current peer, this does not require
+        a quorum.
+      - Majority read: read the value that the majority of peers agree on.
+        If no majority, return a read error.
+      - Everyone read: read the value, but only return success if all peers
+        agree on the value.
+  - CompareAndWrite: propose a write of a value of a specific key.
+    - The user must specify the exact old value for this operation to succeed.
+    - If the operation fails because of a mismatchng old value, retry with
+      backoff until either success or timeout.
+    - This means the correct procedure for an unconditional write is to
+      first read the value of a key, then issue CompareAndWrite.
+      - In case of success, return success.
+      - In case of a failure, back-off exponentially, then retry.
+- Add a HTTP endpoint panel which has one entry for each gRPC API function,
+  and allows the user to fill out a form of arguments then submit the command.
+  Display the command success / failure status in a butterbar.
+  - Whenever the user API is updated, update the HTTP panel accordingly.
+
+#### Feature A.2: locking
+
+This uses the library from the user API, and also modifies the way synod agents
+treat writes.
+
+- If the user wants to write to a key which has `_lockable` as a path
+  component, such as `/foo/_lockable/bar`, it must first successfully write to
+  a path `/foo/_lockable/_lock`.
+  - The contents of the entry with the name `_lock` are at minimum:
+    - The Agent ID of the agent succesfully acquired the lock.
+    - The timestamp at which the lock expires.
+- Synod agents MUST refuse a write to `/foo/_lockable/bar` if the lock at
+  `/foo/_lockable/_lock` is held by another agent, or if the lock has expired.
+  - If the lock has expired, the agent may attempt to acquire it.
+  - If the lock is held by another agent, the agent must refuse the write.
+- The lock is acquired by a successful `CompareAndWrite` operation on the
+  `_lock` key.
+- The lock is released by a `CompareAndWrite` operation on the `_lock` key
+  which sets its value to empty.
+- The lock can be renewed by a `CompareAndWrite` operation on the `_lock` key
+  which updates the timestamp.
+- Add a new gRPC API endpoint for `AcquireLock`, `ReleaseLock`, `RenewLock`.
+  - `AcquireLock` takes a key path and a duration for the lock.
+  - `ReleaseLock` takes a key path.
+  - `RenewLock` takes a key path and a new duration.
+- If the path contains multiple path segments `_lockable` then the lock must be
+  acquired on **EACH** `_lockable` segment, starting from the `_lockable`
+  segment which is earliest in the key path, towards the `_lockable` segments
+  towards the end of the path.
+- Update the HTTP endpoint panel to include forms for these new lock operations.
+
+
+
 ## Bugs
 
 ### B.1: /api/command
