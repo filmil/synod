@@ -65,7 +65,7 @@ func (c *Cell) SetPeers(peers []PeerClient) {
 
 func (c *Cell) Propose(ctx context.Context, key string, value []byte) error {
 	for {
-		_, _, version, err := c.store.GetKVEntry(key)
+		_, _, version, _, err := c.store.GetKVEntry(key)
 		if err != nil {
 			return fmt.Errorf("failed to get KV entry for %s: %w", key, err)
 		}
@@ -93,9 +93,9 @@ func (c *Cell) Propose(ctx context.Context, key string, value []byte) error {
 func (c *Cell) ProposeMembership(ctx context.Context, agentID, address string) error {
 	key := "/_internal/peers"
 	for {
-		val, _, version, err := c.store.GetKVEntry(key)
+		val, _, version, _, err := c.store.GetKVEntry(key)
 		if err != nil {
-			return fmt.Errorf("failed to get KV entry for peers: %w", err)
+			return fmt.Errorf("failed to get KV entry for peers: %w", key, err)
 		}
 		var peers map[string]string
 		if val != nil {
@@ -234,7 +234,7 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 					c.agentID, p.AgentID(), key, peerPropNum, localPropNum)
 				c.CatchUp(ctx, p, key)
 				// Update local state map after catch up
-				_, _, newPropNum, err := c.store.GetKVEntry(key)
+				_, _, newPropNum, _, err := c.store.GetKVEntry(key)
 				if err != nil {
 					glog.Errorf("Cell(%s): Failed to get updated KV entry for %s after catchup: %v", c.agentID, key, err)
 				} else {

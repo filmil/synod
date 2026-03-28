@@ -20,6 +20,7 @@
   create files in a subdirectory of `local` keyed by this session's ID.
   * Anything that needs to be preserved across sessions, store in `local/common`.
 * Never ignore errors: either propagate them with context attached, or log them.
+* Don't use `glog.Fatalf`, instead log at `glog.Errof` and call `os.Exit` instead.
 
 ## Requirements
 
@@ -27,9 +28,10 @@
   algorithm. Call a collection of agents which take part in the same Paxos
   algorithm run a "cell".
 * Take as a parameter a directory, which will contain all state files, and all
-  constant files. Abort if one is not provided.  Assume that all needed files
-  are at a fixed path from this directory. No files may be outside of this
-  top level dir.
+  constant files.
+  * Abort if one is not provided.
+  * Assume that all needed files are at a fixed path from this directory. No
+    files may be outside of this top level dir.
 * Design an API that agents can use to talk Paxos to each other, define RPC
   functions and endpoints for all Paxos messages.
 * Use a SQLite for storing the ledger and any other needed state, place it in
@@ -37,8 +39,14 @@
 * The state is a key-value store. The keys are unix-like paths, e.g. `/foo/bar`
   and similar.
 * Serve a gRPC endpoint that can be used for agents to reach out to each other.
+  * If the default gRPC endpoint port is not available, try for 1 minute to find
+    a free port to use.
+  * When found, print which port it is.
 * Serve a http end point which serves a rudimentary web page allowing users to
   monitor the state of the algorithm.
+  * If the default HTTP endpoint port is not available, try for 1 minute to find
+    a free port to use.
+  * When found, print which port it is.
   * Use locally saved bootstrap library to style the pages. Make them reasonably
     pretty.
   * Use multi-card design so that we can have multiple status pages to select
@@ -91,3 +99,10 @@
 * Add an integration test, which starts 5 processes which communicate between
   each other, and just send a command for all to exit. Once they all agree,
   finish. If they take more than 2 minutes, say it's a timeout.
+
+
+## Bugs
+
+# B.1: /api/command
+
+The 'api/command' page is rendered as text, not as HTML, fix.

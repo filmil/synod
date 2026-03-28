@@ -1,0 +1,8 @@
+filegroup(
+    name = "bootstrap",
+    srcs = [
+        "bootstrap.bundle.min.js",
+        "bootstrap.min.css",
+    ],
+    visibility = ["//visibility:public"],
+)

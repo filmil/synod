@@ -61,7 +61,8 @@ func (s *Store) init() error {
 		key TEXT PRIMARY KEY,
 		value BLOB,
 		type TEXT,
-		version INTEGER
+		version INTEGER,
+		deleted BOOLEAN DEFAULT FALSE
 	);
 
 	CREATE TABLE IF NOT EXISTS membership (
@@ -192,13 +193,15 @@ func (s *Store) GetMembers() (map[string]string, error) {
 }
 
 func (s *Store) CommitKV(key string, value []byte, valType string, version uint64) error {
+	deleted := len(value) == 0
 	_, err := s.db.Exec(`
-		INSERT INTO kv_store (key, value, type, version) VALUES (?, ?, ?, ?)
+		INSERT INTO kv_store (key, value, type, version, deleted) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(key) DO UPDATE SET
 			value = excluded.value,
 			type = excluded.type,
-			version = excluded.version`,
-		key, value, valType, version)
+			version = excluded.version,
+			deleted = excluded.deleted`,
+		key, value, valType, version, deleted)
 	if err != nil {
 		return fmt.Errorf("failed to commit KV: %w", err)
 	}
@@ -228,16 +231,16 @@ func (s *Store) GetKVState() (map[string]uint64, error) {
 	return keys, nil
 }
 
-func (s *Store) GetKVEntry(key string) (value []byte, valType string, version uint64, err error) {
+func (s *Store) GetKVEntry(key string) (value []byte, valType string, version uint64, deleted bool, err error) {
 	var pn sql.NullInt64
-	err = s.db.QueryRow("SELECT value, type, version FROM kv_store WHERE key = ?", key).Scan(&value, &valType, &pn)
+	err = s.db.QueryRow("SELECT value, type, version, deleted FROM kv_store WHERE key = ?", key).Scan(&value, &valType, &pn, &deleted)
 	if err == sql.ErrNoRows {
-		return nil, "", 0, nil
+		return nil, "", 0, false, nil
 	}
 	if pn.Valid {
 		version = uint64(pn.Int64)
 	}
-	return value, valType, version, err
+	return value, valType, version, deleted, err
 }
 
 type KVEntry struct {
@@ -245,10 +248,11 @@ type KVEntry struct {
 	Value   []byte
 	Type    string
 	Version uint64
+	Deleted bool
 }
 
 func (s *Store) GetAllKVs() ([]KVEntry, error) {
-	rows, err := s.db.Query("SELECT key, value, type, version FROM kv_store ORDER BY key")
+	rows, err := s.db.Query("SELECT key, value, type, version, deleted FROM kv_store WHERE deleted = FALSE ORDER BY key")
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +262,7 @@ func (s *Store) GetAllKVs() ([]KVEntry, error) {
 	for rows.Next() {
 		var e KVEntry
 		var pn sql.NullInt64
-		if err := rows.Scan(&e.Key, &e.Value, &e.Type, &pn); err != nil {
+		if err := rows.Scan(&e.Key, &e.Value, &e.Type, &pn, &e.Deleted); err != nil {
 			return nil, err
 		}
 		if pn.Valid {

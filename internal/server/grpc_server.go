@@ -67,7 +67,7 @@ func (s *PaxosServer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxo
 }
 
 func (s *PaxosServer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error) {
-	val, valType, propNum, err := s.store.GetKVEntry(req.Key)
+	val, valType, propNum, _, err := s.store.GetKVEntry(req.Key)
 	if err != nil {
 		return nil, err
 	}

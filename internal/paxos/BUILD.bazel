@@ -14,6 +14,7 @@ go_library(
         "//proto/paxos/v1:paxos",
         "@com_github_golang_glog//:glog",
         "@com_github_google_uuid//:uuid",
+        "@org_golang_google_protobuf//encoding/prototext:go_default_library",
     ],
 )
 

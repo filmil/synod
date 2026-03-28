@@ -1,13 +1,15 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 
-	"github.com/golang/glog"
+	"github.com/bazelbuild/rules_go/go/runfiles"
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/state"
+	"github.com/golang/glog"
 )
 
 type HTTPServer struct {
@@ -32,12 +34,31 @@ func (s *HTTPServer) Run() error {
 	mux.HandleFunc("/store", s.handleStore)
 	mux.HandleFunc("/api/command", s.handleCommand)
 	
-	// Serve locally saved bootstrap
+	// Serve locally saved bootstrap via runfiles
 	mux.HandleFunc("/static/bootstrap.min.css", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "third_party/bootstrap/bootstrap.min.css")
+		path, err := runfiles.Rlocation("_main/third_party/bootstrap/bootstrap.min.css")
+		if err != nil {
+			// fallback for bzlmod if _main doesn't work
+			path, err = runfiles.Rlocation("synod/third_party/bootstrap/bootstrap.min.css")
+		}
+		if err != nil {
+			glog.Errorf("Failed to resolve runfile: %v", err)
+			http.Error(w, "File not found", http.StatusNotFound)
+			return
+		}
+		http.ServeFile(w, r, path)
 	})
 	mux.HandleFunc("/static/bootstrap.bundle.min.js", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "third_party/bootstrap/bootstrap.bundle.min.js")
+		path, err := runfiles.Rlocation("_main/third_party/bootstrap/bootstrap.bundle.min.js")
+		if err != nil {
+			path, err = runfiles.Rlocation("synod/third_party/bootstrap/bootstrap.bundle.min.js")
+		}
+		if err != nil {
+			glog.Errorf("Failed to resolve runfile: %v", err)
+			http.Error(w, "File not found", http.StatusNotFound)
+			return
+		}
+		http.ServeFile(w, r, path)
 	})
 
 	glog.Infof("HTTP server listening at %v", s.addr)
@@ -50,11 +71,19 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
 	}
-	members, err := s.store.GetMembers()
+	
+	val, _, _, _, err := s.store.GetKVEntry("/_internal/peers")
 	if err != nil {
-		http.Error(w, "Failed to get members", http.StatusInternalServerError)
+		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
 		return
 	}
+	members := make(map[string]string)
+	if val != nil {
+		if err := json.Unmarshal(val, &members); err != nil {
+			glog.Errorf("Failed to unmarshal peers map: %v", err)
+		}
+	}
+
 	kvs, err := s.store.GetAllKVs()
 	if err != nil {
 		http.Error(w, "Failed to get KV store", http.StatusInternalServerError)
@@ -117,7 +146,11 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(ids)
 
 	for _, id := range ids {
-		fmt.Fprintf(w, "<tr><td><small>%s</small></td><td>%s</td></tr>", id, members[id])
+		label := id
+		if id == agentID {
+			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", id)
+		}
+		fmt.Fprintf(w, "<tr><td><small>%s</small></td><td>%s</td></tr>", label, members[id])
 	}
 
 	fmt.Fprintf(w, `
@@ -234,10 +267,18 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
 	}
-	members, err := s.store.GetMembers()
+	
+	val, _, _, _, err := s.store.GetKVEntry("/_internal/peers")
 	if err != nil {
-		http.Error(w, "Failed to get members", http.StatusInternalServerError)
+		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
 		return
+	}
+
+	members := make(map[string]string)
+	if val != nil {
+		if err := json.Unmarshal(val, &members); err != nil {
+			glog.Errorf("Failed to unmarshal peers map: %v", err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -413,5 +454,30 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	fmt.Fprintf(w, "Consensus reached for key %s with value: %s. <a href='/'>Back</a>", key, val)
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Synod Agent Proposal</title>
+    <link href="/static/bootstrap.min.css" rel="stylesheet">
+  </head>
+  <body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+      <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">Synod Paxos Agent</span>
+      </div>
+    </nav>
+    <div class="container">
+      <div class="alert alert-success" role="alert">
+        <h4 class="alert-heading">Success!</h4>
+        <p>Consensus reached for key <code>%s</code> with value: <code>%s</code>.</p>
+        <hr>
+        <a href="/" class="btn btn-primary">Back to Status</a>
+      </div>
+    </div>
+  </body>
+</html>`, key, val)
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/filmil/synod/internal/state"
+	"google.golang.org/protobuf/encoding/prototext"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 )
 
@@ -57,7 +58,10 @@ func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*p
 	}
 
 	// Log the message
-	if err := a.store.LogMessage("Prepare", req.AgentId, a.agentID, []byte(req.String()), []byte(resp.String())); err != nil {
+	opts := prototext.MarshalOptions{Multiline: true}
+	reqBytes := []byte(opts.Format(req))
+	respBytes := []byte(opts.Format(resp))
+	if err := a.store.LogMessage("Prepare", req.AgentId, a.agentID, reqBytes, respBytes); err != nil {
 		glog.Errorf("Acceptor(%s): Failed to log Prepare message: %v", a.agentID, err)
 	}
 	return resp, nil
@@ -96,7 +100,10 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 	}
 
 	// Log the message
-	if err := a.store.LogMessage("Accept", req.AgentId, a.agentID, []byte(req.String()), []byte(resp.String())); err != nil {
+	opts := prototext.MarshalOptions{Multiline: true}
+	reqBytes := []byte(opts.Format(req))
+	respBytes := []byte(opts.Format(resp))
+	if err := a.store.LogMessage("Accept", req.AgentId, a.agentID, reqBytes, respBytes); err != nil {
 		glog.Errorf("Acceptor(%s): Failed to log Accept message: %v", a.agentID, err)
 	}
 	return resp, nil
