@@ -14,6 +14,8 @@ import (
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 )
 
+const schemaVersion = 1
+
 type Store struct {
 	db *sql.DB
 }
@@ -43,7 +45,31 @@ func NewStore(stateDir string) (*Store, error) {
 }
 
 func (s *Store) init() error {
+	// Check if schema_version table exists
+	var tableName string
+	err := s.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'").Scan(&tableName)
+	if err == sql.ErrNoRows {
+		// Table doesn't exist, this is a fresh database (or one from before versioning was added)
+		// We'll proceed with creating all tables, including schema_version.
+	} else if err != nil {
+		return fmt.Errorf("failed to check for schema_version table: %w", err)
+	} else {
+		// Table exists, check the version
+		var currentVersion int
+		err = s.db.QueryRow("SELECT version FROM schema_version LIMIT 1").Scan(&currentVersion)
+		if err != nil {
+			return fmt.Errorf("failed to read schema version: %w", err)
+		}
+		if currentVersion != schemaVersion {
+			return fmt.Errorf("schema version mismatch: expected %d, got %d. Please clear your state directory or run migrations", schemaVersion, currentVersion)
+		}
+	}
+
 	schema := `
+	CREATE TABLE IF NOT EXISTS schema_version (
+		version INTEGER PRIMARY KEY
+	);
+
 	CREATE TABLE IF NOT EXISTS agent_info (
 		key TEXT PRIMARY KEY,
 		value TEXT
@@ -84,6 +110,12 @@ func (s *Store) init() error {
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("failed to initialize database schema: %w", err)
 	}
+
+	// Insert the current version if it doesn't exist (e.g. fresh DB)
+	if _, err := s.db.Exec("INSERT OR IGNORE INTO schema_version (version) VALUES (?)", schemaVersion); err != nil {
+		return fmt.Errorf("failed to set schema version: %w", err)
+	}
+
 	return nil
 }
 
