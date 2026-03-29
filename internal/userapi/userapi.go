@@ -159,4 +159,3 @@ func (a *UserAPI) Shutdown(ctx context.Context, req *paxosv1.ShutdownRequest) (*
 
 	return &paxosv1.ShutdownResponse{Success: true, Message: "Shutdown initiated. Entering lame duck mode."}, nil
 }
-
