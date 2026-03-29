@@ -19,6 +19,7 @@ type Acceptor struct {
 }
 
 // NewAcceptor creates and returns a new Acceptor.
+// agentID is the ID of the acceptor, and store is the database to use.
 func NewAcceptor(agentID string, store *state.Store) *Acceptor {
 	return &Acceptor{
 		agentID: agentID,
