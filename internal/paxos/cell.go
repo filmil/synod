@@ -80,24 +80,25 @@ type Cell struct {
 	// Optional hook for lock checking during Propose
 	lockChecker func(ctx context.Context, key string) error
 
-	ShutdownChan chan struct{}
-	shuttingDown bool
-	selfInfo     state.PeerInfo
+	ShutdownChan        chan struct{}
+	shuttingDown        bool
+	selfInfo            state.PeerInfo
+	missedEndpointCount map[string]int
 }
 
-// NewCell creates and initializes a new Cell.
 func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory PeerFactory, selfGRPCAddr, selfHTTPURL string) *Cell {
 	c := &Cell{
-		agentID:        agentID,
-		store:          store,
-		acceptor:       acceptor,
-		peers:          make(map[string]PeerClient),
-		ephemeralPeers: make(map[string]ConnectionInfo),
-		peerFactory:    factory,
-		selfGRPCAddr:   selfGRPCAddr,
-		selfHTTPURL:    selfHTTPURL,
-		ShutdownChan:   make(chan struct{}),
-		proposer:       NewProposer(agentID, []PeerClient{}, acceptor),
+		agentID:             agentID,
+		store:               store,
+		acceptor:            acceptor,
+		peers:               make(map[string]PeerClient),
+		ephemeralPeers:      make(map[string]ConnectionInfo),
+		peerFactory:         factory,
+		selfGRPCAddr:        selfGRPCAddr,
+		selfHTTPURL:         selfHTTPURL,
+		ShutdownChan:        make(chan struct{}),
+		proposer:            NewProposer(agentID, []PeerClient{}, acceptor),
+		missedEndpointCount: make(map[string]int),
 	}
 	if selfGRPCAddr != "" || selfHTTPURL != "" {
 		c.ephemeralPeers[agentID] = ConnectionInfo{
@@ -701,8 +702,35 @@ func (c *Cell) syncMissingEndpoints(ctx context.Context) {
 				c.UpdateEphemeralPeer(missingID, info.HostPort, info.HttpUrl)
 				glog.Infof("Cell(%s): EndpointSync: Discovered endpoints for %s via %s: %s", c.agentID, missingID, targetPeer.AgentID(), info.HostPort)
 				foundAny = true
+				
+				c.mu.Lock()
+				delete(c.missedEndpointCount, missingID)
+				c.mu.Unlock()
 			}
 		}
+
+		// Track misses for unresolved peers
+		c.mu.Lock()
+		for _, mID := range missing {
+			if _, ok := c.ephemeralPeers[mID]; !ok {
+				c.missedEndpointCount[mID]++
+				glog.Warningf("Cell(%s): EndpointSync: Missing endpoint for %s (miss count: %d)", c.agentID, mID, c.missedEndpointCount[mID])
+				if c.missedEndpointCount[mID] >= 5 {
+					glog.Errorf("Cell(%s): EndpointSync: Peer %s missed 5 times, proposing removal", c.agentID, mID)
+					// We launch this in a goroutine so it doesn't block the sync loop or fail the current bo.Retry explicitly
+					go func(removeID string) {
+						removeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+						defer cancel()
+						if err := c.ProposeRemoval(removeCtx, removeID); err != nil {
+							glog.Errorf("Cell(%s): Failed to propose removal for dead peer %s: %v", c.agentID, removeID, err)
+						}
+					}(mID)
+					// Reset count to prevent spamming proposals
+					c.missedEndpointCount[mID] = 0
+				}
+			}
+		}
+		c.mu.Unlock()
 
 		if !foundAny {
 			return fmt.Errorf("no missing endpoints were resolved by %s", targetPeer.AgentID())
