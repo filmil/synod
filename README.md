@@ -11,6 +11,8 @@ Synod is a distributed Paxos coordination agent implemented in Go. It manages a 
 
 This quickstart shows how to download the repository and quickly start 3 synod agents which talk to each other and are already set up to work properly. It establishes state directories for each agent following the XDG base directory specification.
 
+You can also run the extracted script locally by executing `tools/try_it.bash` from the root of the repository.
+
 ```bash
 #!/bin/bash
 set -e
