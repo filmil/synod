@@ -5,24 +5,32 @@
 
 ## What it does
 
-Synod is a distributed Paxos coordination agent implemented in Go. It manages a highly available, synchronized Key-Value store across a network of peers using the Paxos consensus algorithm. It allows multiple dynamically joining network nodes to agree on a shared state, ensuring fault tolerance and consistency across the cluster.
+Synod is a distributed Paxos coordination agent implemented in Go. It manages a
+highly available, synchronized Key-Value store across a network of peers using
+the Paxos consensus algorithm. It allows multiple dynamically joining network
+nodes to agree on a shared state, ensuring fault tolerance and consistency
+across the cell.
 
 ## Quickstart
 
-This quickstart shows how to download the repository and quickly start 3 synod agents which talk to each other and are already set up to work properly. It establishes state directories for each agent following the XDG base directory specification.
+This quickstart shows how to download the repository and quickly start 3 synod
+agents which talk to each other and are already set up to work properly. It
+establishes state directories for each agent following the XDG base directory
+specification.
 
-You can also run the extracted script locally by executing `tools/try_it.bash` from the root of the repository.
+You can also run the extracted script locally by executing `./tools/try_it.bash`
+from the root of the repository.
 
 ```bash
 #!/bin/bash
 set -e
 
-# Clone the repository and enter it
-git clone https://github.com/filmil/synod.git
-cd synod
-
 # Determine the base directory for state following XDG conventions
 STATE_BASE="${XDG_STATE_HOME:-$HOME/.local/state}/synod"
+
+bazel build //cmd/agent
+
+readonly _agent_bin="./bazel-bin/cmd/agent/agent_/agent"
 
 # Create state directories for the 3 agents
 mkdir -p "$STATE_BASE/agent1"
@@ -30,7 +38,8 @@ mkdir -p "$STATE_BASE/agent2"
 mkdir -p "$STATE_BASE/agent3"
 
 echo "Starting Agent 1 (Bootstrap)..."
-bazel run //cmd/agent -- \
+timeout 5m "${_agent_bin}" \
+  --logtostderr \
   --state_dir="$STATE_BASE/agent1" \
   --grpc_addr=":50101" \
   --http_addr=":8081" &
@@ -40,27 +49,25 @@ PID1=$!
 sleep 3
 
 echo "Starting Agent 2..."
-bazel run //cmd/agent -- \
+timeout 5m "${_agent_bin}" \
+  --logtostderr \
   --state_dir="$STATE_BASE/agent2" \
-  --grpc_addr=":50102" \
-  --http_addr=":8082" \
-  --peer="127.0.0.1:50101" &
+  --peer=":50101" &
 PID2=$!
 
 echo "Starting Agent 3..."
-bazel run //cmd/agent -- \
+timeout 5m "${_agent_bin}" \
+  --logtostderr \
   --state_dir="$STATE_BASE/agent3" \
   --grpc_addr=":50103" \
   --http_addr=":8083" \
-  --peer="127.0.0.1:50101" &
+  --peer=":50101" &
 PID3=$!
 
 echo ""
-echo "Cluster is running! Press Ctrl+C to stop."
-echo "View Agent 1: http://localhost:8081"
-echo "View Agent 2: http://localhost:8082"
-echo "View Agent 3: http://localhost:8083"
-echo ""
+echo "Cell is running!"
+echo "View Agent 1 at: http://localhost:8081"
+echo "Navigate to other agents from there"
 
 # Wait for all background processes
 wait $PID1 $PID2 $PID3
@@ -71,7 +78,7 @@ wait $PID1 $PID2 $PID3
 - **Key-Value Store:** Implements standard Paxos consensus bound to unix-path
   keys (e.g. `/system/config`).
 - **Persistence:** SQLite backed via `mattn/go-sqlite3`.
-- **Dynamic Membership:** Nodes can dynamically join the cluster via gRPC.
+- **Dynamic Membership:** Nodes can dynamically join the cell via gRPC.
   Network membership itself is managed within the KV Store under the
   `/_internal/peers` key using optimistic concurrency/versioning.
 - **Identities & Short Names:** Agents are assigned a unique UUID alongside a
@@ -83,9 +90,9 @@ wait $PID1 $PID2 $PID3
   store versions in the background, recovering any missing keys or resolving
   out-of-date versions. Periodically pings all known peers to monitor
   availability. If a peer fails to respond, a Paxos proposal is automatically
-  initiated to remove the unresponsive node from the cluster membership.
+  initiated to remove the unresponsive node from the cell membership.
 - **User API:** Provides a dedicated gRPC and HTTP interface for users to
-  interact with the cluster. Supports reading values with specific quorum
+  interact with the cell. Supports reading values with specific quorum
   requirements (Local, Majority, All) and writing values using Compare-and-Swap
   (CAS) semantics via `CompareAndWrite`.
 - **Hierarchical Locking:** Allows users to acquire distributed locks on key
@@ -96,7 +103,7 @@ wait $PID1 $PID2 $PID3
 - **Robust Retries & Quorums:** Network and consensus operations utilize
   exponential backoff for transient failures. Lock acquisitions and writes
   require a `QuorumMajority`, while releasing locks requires a `QuorumAll`
-  consensus to guarantee cluster-wide consistency.
+  consensus to guarantee cell-wide consistency.
 - **Web UI & Introspection:** Includes an embedded HTTP dashboard to inspect
   participants, read the Key-Value Store, and examine the RPC message log. The
   UI features a dedicated User API panel with a real-time table of ongoing
@@ -106,7 +113,8 @@ wait $PID1 $PID2 $PID3
 
 ## Running the Agent
 
-You can start the agent using Bazel. Ensure you provide it a local directory for the SQLite state.
+You can start the agent using Bazel. Ensure you provide it a local existing
+directory for the SQLite state.
 
 **Start the first agent (bootstrap node):**
 
@@ -117,14 +125,15 @@ bazel run //cmd/agent -- \
   --http_addr=":8081"
 ```
 
-**Start a second agent and join the cluster:**
+**Start a second agent and join the cell:**
 
 ```bash
 bazel run //cmd/agent -- \
   --state_dir="$(pwd)/local/agent2" \
-  --grpc_addr=":50102" \
-  --http_addr=":8082" \
-  --peer="127.0.0.1:50101"
+  --peer=":50101"
 ```
 
-Once running, you can monitor the local state of either node by navigating your browser to `http://localhost:8081` or `http://localhost:8082`.
+Once running, you can monitor the local state of the first node by navigating
+your browser to `http://localhost:8081`, and you can follow from there to other
+nodes. You can also specify the grpc and http hostports for the other agent if
+you require it to appear at a pre-determined hostport.
