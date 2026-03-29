@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"html"
+	"html/template"
 	"net"
 	"net/http"
 	"net/url"
@@ -41,6 +43,129 @@ type OngoingRequest struct {
 	Finished  bool
 	// Success indicates if a finished request was successful.
 	Success   bool
+}
+
+//go:embed templates/*.html
+var templateFS embed.FS
+
+var templates = template.Must(template.ParseFS(templateFS, "templates/*.html"))
+
+// HTTPServer provides a web dashboard for inspecting agent state and issuing commands.
+type BaseData struct {
+	Title     string
+	AgentName string
+	ActiveNav string
+}
+
+type Participant struct {
+	IDLabel   template.HTML
+	ShortName string
+	GRPCAddr  string
+	HTTPLink  template.HTML
+}
+
+type IndexData struct {
+	BaseData
+	AgentID      string
+	KeysCount    int
+	Participants []Participant
+}
+
+type Peer struct {
+	Label     template.HTML
+	AgentID   string
+	Endpoints template.HTML
+}
+
+type Message struct {
+	ID        int64
+	Timestamp string
+	Type      string
+	Sender    string
+	Receiver  string
+	Request   template.HTML
+	Reply     template.HTML
+}
+
+type MessagesData struct {
+	BaseData
+	Peers    []Peer
+	Messages []Message
+}
+
+type KnownPeer struct {
+	ID       string
+	Name     string
+	GRPCURL  string
+	HTTPLink template.HTML
+}
+
+type PeersData struct {
+	BaseData
+	Peers []KnownPeer
+}
+
+type KV struct {
+	Key     string
+	Value   template.HTML
+	Type    string
+	Version uint64
+}
+
+type StoreData struct {
+	BaseData
+	KVs []KV
+}
+
+type CommandData struct {
+	BaseData
+	Key   string
+	Value string
+}
+
+type UserAPIData struct {
+	BaseData
+	StatusMsg   template.HTML
+	OngoingHTML template.HTML
+}
+
+type SystemData struct {
+	BaseData
+	NumCPU        int
+	NumGoroutines int
+	Alloc         uint64
+	AllocMB       float64
+	TotalAlloc    uint64
+	TotalAllocMB  float64
+	Sys           uint64
+	SysMB         float64
+	NumGC         uint32
+	ShowDump      bool
+	Dump          string
+}
+
+type GRPCServerData struct {
+	ServerID       int64
+	CallsStarted   int64
+	CallsSucceeded int64
+	CallsFailed    int64
+	LastCall       string
+}
+
+type GRPCChannelData struct {
+	ChannelID      int64
+	Target         string
+	State          string
+	CallsStarted   int64
+	CallsSucceeded int64
+	CallsFailed    int64
+}
+
+type GRPCStatusData struct {
+	BaseData
+	ErrorMsg template.HTML
+	Servers  []GRPCServerData
+	Channels []GRPCChannelData
 }
 
 // HTTPServer provides a web dashboard for inspecting agent state and issuing commands.
@@ -136,99 +261,6 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	return http.Serve(lis, mux)
 }
 
-func (s *HTTPServer) renderHeader(w http.ResponseWriter, title, agentName, activeNav string) {
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>%s - %s</title>
-    <link href="/static/bootstrap.min.css" rel="stylesheet">
-  </head>
-  <body class="bg-light">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-      <div class="container-fluid">
-        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: %s</span>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="navbarNav">
-          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-            <li class="nav-item"><a class="nav-link %s" href="/">Status</a></li>
-            <li class="nav-item"><a class="nav-link %s" href="/store">KV Store</a></li>
-            <li class="nav-item"><a class="nav-link %s" href="/messages">Messages</a></li>
-            <li class="nav-item"><a class="nav-link %s" href="/peers">Peers</a></li>
-            <li class="nav-item"><a class="nav-link %s" href="/userapi">User API</a></li>
-            <li class="nav-item"><a class="nav-link %s" href="/system">System</a></li>
-            <li class="nav-item"><a class="nav-link %s" href="/grpc">gRPC Status</a></li>
-          </ul>
-          <div class="dropdown">
-            <button class="btn btn-outline-light dropdown-toggle btn-sm" type="button" id="reloadDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-              Reload: <span id="reloadLabel">1m</span>
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark" aria-labelledby="reloadDropdown">
-              <li><a class="dropdown-item" href="#" onclick="setReload(1000)">1s</a></li>
-              <li><a class="dropdown-item" href="#" onclick="setReload(10000)">10s</a></li>
-              <li><a class="dropdown-item" href="#" onclick="setReload(30000)">30s</a></li>
-              <li><a class="dropdown-item" href="#" onclick="setReload(60000)">1m</a></li>
-              <li><a class="dropdown-item" href="#" onclick="setReload(300000)">5m</a></li>
-              <li><a class="dropdown-item" href="#" onclick="setReload(600000)">10m</a></li>
-              <li><a class="dropdown-item" href="#" onclick="setReload(1200000)">20m</a></li>
-              <li><a class="dropdown-item" href="#" onclick="setReload(1800000)">30m</a></li>
-              <li><a class="dropdown-item" href="#" onclick="setReload(3600000)">1h</a></li>
-              <li><hr class="dropdown-divider"></li>
-              <li><a class="dropdown-item" href="#" onclick="setReload(0)">Off</a></li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </nav>
-    <div class="container">`, title, agentName, agentName,
-		s.activeClass(activeNav, "status"),
-		s.activeClass(activeNav, "store"),
-		s.activeClass(activeNav, "messages"),
-		s.activeClass(activeNav, "peers"),
-		s.activeClass(activeNav, "userapi"),
-		s.activeClass(activeNav, "system"),
-		s.activeClass(activeNav, "grpc"))
-}
-
-func (s *HTTPServer) activeClass(active, current string) string {
-	if active == current {
-		return "active"
-	}
-	return ""
-}
-
-func (s *HTTPServer) renderFooter(w http.ResponseWriter) {
-	fmt.Fprintf(w, `
-    </div>
-    <script src="/static/bootstrap.bundle.min.js"></script>
-    <script>
-      function setReload(ms) {
-        localStorage.setItem('reloadInterval', ms);
-        location.reload();
-      }
-      (function() {
-        const ms = parseInt(localStorage.getItem('reloadInterval')) ?? 60000;
-        const labelMap = {
-          1000: '1s', 10000: '10s', 30000: '30s', 60000: '1m',
-          300000: '5m', 600000: '10m', 1200000: '20m', 1800000: '30m',
-          3600000: '1h', 0: 'Off'
-        };
-        const label = labelMap[ms] || (ms > 0 ? (ms/1000 + 's') : 'Off');
-        document.getElementById('reloadLabel').innerText = label;
-        if (ms > 0) {
-          setTimeout(() => location.reload(), ms);
-        }
-      })();
-    </script>
-  </body>
-</html>`)
-}
-
 func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	agentID, shortName, err := s.store.GetAgentID()
 	if err != nil {
@@ -254,29 +286,15 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderHeader(w, "Synod Agent", shortName, "status")
-	fmt.Fprintf(w, `
-      <div class="row">
-        <div class="col-md-4">
-          <div class="card shadow-sm mb-4">
-            <div class="card-header bg-primary text-white">Agent Info</div>
-            <div class="card-body">
-              <p class="card-text"><strong>ID:</strong> <small class="text-muted">%s</small></p>
-              <p class="card-text"><strong>Name:</strong> %s</p>
-              <p class="card-text"><strong>Keys Count:</strong> %d</p>
-            </div>
-          </div>
-        </div>
-        <div class="col-md-8">
-          <div class="card shadow-sm mb-4">
-            <div class="card-header bg-success text-white">Participants</div>
-            <div class="card-body">
-              <div class="table-responsive">
-                <table class="table table-hover">
-                  <thead>
-                    <tr><th>Agent ID</th><th>Name</th><th>gRPC Address</th><th>HTTP Dashboard</th></tr>
-                  </thead>
-                  <tbody>`, agentID, shortName, len(kvs))
+	data := IndexData{
+		BaseData: BaseData{
+			Title:     "Synod Agent",
+			AgentName: shortName,
+			ActiveNav: "status",
+		},
+		AgentID:   agentID,
+		KeysCount: len(kvs),
+	}
 
 	var ids []string
 	for id := range members {
@@ -304,35 +322,19 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
-		fmt.Fprintf(w, "<tr><td><small>%s</small></td><td>%s</td><td><code>%s</code></td><td>%s</td></tr>", label, info.ShortName, grpcAddr, httpLink)
+		data.Participants = append(data.Participants, Participant{
+			IDLabel:   template.HTML(label),
+			ShortName: info.ShortName,
+			GRPCAddr:  grpcAddr,
+			HTTPLink:  template.HTML(httpLink),
+		})
 	}
 
-	fmt.Fprintf(w, `
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div class="card shadow-sm mb-4">
-            <div class="card-header bg-info text-white">Propose Command</div>
-            <div class="card-body">
-              <form action="/api/command" method="post" class="row g-3">
-                <div class="col-auto">
-                  <input type="text" name="key" class="form-control" placeholder="Key (e.g. /my/key)">
-                </div>
-                <div class="col-auto">
-                  <input type="text" name="value" class="form-control" placeholder="Value">
-                </div>
-                <div class="col-auto">
-                  <button type="submit" class="btn btn-primary">Propose</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      </div>`)
-	s.renderFooter(w)
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "index.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
@@ -359,19 +361,13 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.renderHeader(w, "Messages", shortName, "messages")
-	fmt.Fprintf(w, `
-      <div class="card shadow-sm mb-4">
-        <div class="card-header bg-primary text-white">Peer Mapping</div>
-        <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-sm table-hover">
-              <thead>
-                <tr>
-                  <th>Short Name</th><th>Agent ID</th><th>Endpoints</th>
-                </tr>
-              </thead>
-              <tbody>`)
+	data := MessagesData{
+		BaseData: BaseData{
+			Title:     "Messages",
+			AgentName: shortName,
+			ActiveNav: "messages",
+		},
+	}
 
 	var ids []string
 	for id := range members {
@@ -398,32 +394,12 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", eph.HTTPURL, eph.HTTPURL)
 		}
 
-		fmt.Fprintf(w, `
-                <tr>
-                  <td>%s</td>
-                  <td><small class="text-muted">%s</small></td>
-                  <td>%s</td>
-                </tr>`, label, id, endpoints)
+		data.Peers = append(data.Peers, Peer{
+			Label:     template.HTML(label),
+			AgentID:   id,
+			Endpoints: template.HTML(endpoints),
+		})
 	}
-
-	fmt.Fprintf(w, `
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div class="card shadow-sm mb-4">
-        <div class="card-header bg-secondary text-white">Recent Messages</div>
-        <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-sm table-hover">
-              <thead>
-                <tr>
-                  <th>ID</th><th>Time</th><th>Type</th><th>Sender</th><th>Receiver</th><th>Request</th><th>Reply</th>
-                </tr>
-              </thead>
-              <tbody>`)
 
 	for _, e := range entries {
 		senderName := e.Sender
@@ -435,25 +411,22 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 			receiverName = info.ShortName
 		}
 
-		fmt.Fprintf(w, `
-                <tr>
-                  <td>%d</td>
-                  <td><small class="text-nowrap">%s</small></td>
-                  <td><span class="badge bg-info text-dark">%s</span></td>
-                  <td>%s</td>
-                  <td>%s</td>
-                  <td>%s</td>
-                  <td>%s</td>
-                </tr>`, e.ID, e.Timestamp, e.Type, senderName, receiverName, prototextToTable(e.Message), prototextToTable(e.Reply))
+		data.Messages = append(data.Messages, Message{
+			ID:        e.ID,
+			Timestamp: e.Timestamp,
+			Type:      e.Type,
+			Sender:    senderName,
+			Receiver:  receiverName,
+			Request:   template.HTML(prototextToTable(e.Message)),
+			Reply:     template.HTML(prototextToTable(e.Reply)),
+		})
 	}
 
-	fmt.Fprintf(w, `
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>`)
-	s.renderFooter(w)
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "messages.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
@@ -478,22 +451,13 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 
 	ephemeral := s.cell.GetEphemeralPeers()
 
-	s.renderHeader(w, "Peers", shortName, "peers")
-	fmt.Fprintf(w, `
-      <div class="card shadow-sm mb-4">
-        <div class="card-header bg-warning text-dark">Known Peers</div>
-        <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-hover">
-              <thead>
-                <tr>
-                  <th>Agent ID</th>
-                  <th>Name</th>
-                  <th>gRPC Address</th>
-                  <th>HTTP Dashboard</th>
-                </tr>
-              </thead>
-              <tbody>`)
+	data := PeersData{
+		BaseData: BaseData{
+			Title:     "Peers",
+			AgentName: shortName,
+			ActiveNav: "peers",
+		},
+	}
 
 	var ids []string
 	for id := range members {
@@ -519,22 +483,19 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
-		fmt.Fprintf(w, `
-                <tr>
-                  <td><code>%s</code></td>
-                  <td>%s</td>
-                  <td><a href="%s" class="text-decoration-none">%s</a></td>
-                  <td>%s</td>
-                </tr>`, id, info.ShortName, grpcURL, grpcURL, httpLink)
+		data.Peers = append(data.Peers, KnownPeer{
+			ID:       id,
+			Name:     info.ShortName,
+			GRPCURL:  grpcURL,
+			HTTPLink: template.HTML(httpLink),
+		})
 	}
 
-	fmt.Fprintf(w, `
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>`)
-	s.renderFooter(w)
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "peers.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
@@ -549,40 +510,28 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderHeader(w, "KV Store", shortName, "store")
-	fmt.Fprintf(w, `
-      <div class="card shadow-sm mb-4">
-        <div class="card-header bg-info text-white">Key-Value Store</div>
-        <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-hover">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Value</th>
-                  <th>Type</th>
-                  <th>Version</th>
-                </tr>
-              </thead>
-              <tbody>`)
-
-	for _, kv := range kvs {
-		fmt.Fprintf(w, `
-                <tr>
-                  <td><code>%s</code></td>
-                  <td>%s</td>
-                  <td>%s</td>
-                  <td>%d</td>
-                </tr>`, kv.Key, maybeJSONToTable(kv.Value), kv.Type, kv.Version)
+	data := StoreData{
+		BaseData: BaseData{
+			Title:     "KV Store",
+			AgentName: shortName,
+			ActiveNav: "store",
+		},
 	}
 
-	fmt.Fprintf(w, `
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>`)
-	s.renderFooter(w)
+	for _, kv := range kvs {
+		data.KVs = append(data.KVs, KV{
+			Key:     kv.Key,
+			Value:   template.HTML(maybeJSONToTable(kv.Value)),
+			Type:    kv.Type,
+			Version: kv.Version,
+		})
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "store.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
@@ -616,15 +565,22 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, shortName, _ := s.store.GetAgentID()
-	s.renderHeader(w, "Proposal Success", shortName, "")
-	fmt.Fprintf(w, `
-      <div class="alert alert-success" role="alert">
-        <h4 class="alert-heading">Success!</h4>
-        <p>Consensus reached for key <code>%s</code> with value: <code>%s</code>.</p>
-        <hr>
-        <a href="/" class="btn btn-primary">Back to Status</a>
-      </div>`, key, val)
-	s.renderFooter(w)
+
+	data := CommandData{
+		BaseData: BaseData{
+			Title:     "Proposal Success",
+			AgentName: shortName,
+			ActiveNav: "",
+		},
+		Key:   key,
+		Value: val,
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "command.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
@@ -639,7 +595,13 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 	copy(ongoing, s.ongoingRequests)
 	s.mu.Unlock()
 
-	s.renderHeader(w, "User API", shortName, "userapi")
+	data := UserAPIData{
+		BaseData: BaseData{
+			Title:     "User API",
+			AgentName: shortName,
+			ActiveNav: "userapi",
+		},
+	}
 
 	ongoingHTML := ""
 	if len(ongoing) > 0 {
@@ -669,6 +631,7 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		ongoingHTML += "</tbody></table></div></div></div>"
 	}
+	data.OngoingHTML = template.HTML(ongoingHTML)
 
 	// Check for result flash message
 	statusMsg := ""
@@ -679,109 +642,13 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 	} else if resultMsg := r.URL.Query().Get("result"); resultMsg != "" {
 		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert">Read Result: <code>%s</code></div>`, html.EscapeString(resultMsg))
 	}
+	data.StatusMsg = template.HTML(statusMsg)
 
-	fmt.Fprintf(w, `
-	  %s
-      <div class="row">
-        <div class="col-md-4">
-          <div class="card shadow-sm mb-4">
-            <div class="card-header bg-primary text-white">Read Key</div>
-            <div class="card-body">
-              <form action="/api/user/read" method="post">
-                <div class="mb-3">
-                  <label class="form-label">Key path</label>
-                  <input type="text" name="key" class="form-control" placeholder="/foo/bar" required>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">Quorum Requirement</label>
-                  <select name="quorum" class="form-select">
-                    <option value="LOCAL">Local (Current Peer Only)</option>
-                    <option value="MAJORITY" selected>Majority</option>
-                    <option value="ALL">All Peers</option>
-                  </select>
-                </div>
-                <button type="submit" class="btn btn-primary">Execute Read</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        
-        <div class="col-md-4">
-          <div class="card shadow-sm mb-4">
-            <div class="card-header bg-success text-white">Compare And Write</div>
-            <div class="card-body">
-              <form action="/api/user/write" method="post">
-                <div class="mb-3">
-                  <label class="form-label">Key path</label>
-                  <input type="text" name="key" class="form-control" placeholder="/foo/bar" required>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">Expected Old Value</label>
-                  <input type="text" name="old_value" class="form-control" placeholder="old value">
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">New Value</label>
-                  <input type="text" name="new_value" class="form-control" placeholder="new value" required>
-                </div>
-                <button type="submit" class="btn btn-success">Execute CompareAndWrite</button>
-              </form>
-            </div>
-          </div>
-        </div>
-
-        <div class="col-md-4">
-          <div class="card shadow-sm mb-4">
-            <div class="card-header bg-warning text-dark">Lock Management</div>
-            <div class="card-body">
-              <h6 class="card-title">Acquire Lock</h6>
-              <form action="/api/user/lock/acquire" method="post" class="mb-3">
-                <div class="mb-2">
-                  <input type="text" name="key_path" class="form-control form-control-sm" placeholder="Key Path (/a/_lockable/b)" required>
-                </div>
-                <div class="mb-2">
-                  <input type="number" name="duration" class="form-control form-control-sm" placeholder="Duration (ms)" required>
-                </div>
-                <button type="submit" class="btn btn-sm btn-warning w-100">Acquire</button>
-              </form>
-              
-              <hr>
-              <h6 class="card-title">Renew Lock</h6>
-              <form action="/api/user/lock/renew" method="post" class="mb-3">
-                <div class="mb-2">
-                  <input type="text" name="key_path" class="form-control form-control-sm" placeholder="Key Path (/a/_lockable/b)" required>
-                </div>
-                <div class="mb-2">
-                  <input type="number" name="duration" class="form-control form-control-sm" placeholder="Duration (ms)" required>
-                </div>
-                <button type="submit" class="btn btn-sm btn-info w-100">Renew</button>
-              </form>
-              
-              <hr>
-              <h6 class="card-title">Release Lock</h6>
-              <form action="/api/user/lock/release" method="post">
-                <div class="mb-2">
-                  <input type="text" name="key_path" class="form-control form-control-sm" placeholder="Key Path (/a/_lockable/b)" required>
-                </div>
-                <button type="submit" class="btn btn-sm btn-danger w-100">Release</button>
-                </form>
-                </div>
-                </div>
-
-                <div class="card shadow-sm mb-4 border-danger">
-                <div class="card-header bg-danger text-white">System Actions</div>
-                <div class="card-body">
-                <h6 class="card-title text-danger">Graceful Shutdown</h6>
-                <p class="small text-muted mb-2">Initiates lame duck mode (stops responding to requests) for 1m, then shuts down.</p>
-                <form action="/api/user/shutdown" method="post" onsubmit="return confirm('Are you sure you want to gracefully shut down this agent?');">
-                <button type="submit" class="btn btn-sm btn-outline-danger w-100">Shutdown Agent</button>
-                </form>
-                </div>
-                </div>
-                </div>
-                </div>
-	`, statusMsg, ongoingHTML)
-
-	s.renderFooter(w)
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "userapi.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleUserAPIRead(w http.ResponseWriter, r *http.Request) {
@@ -1145,62 +1012,37 @@ func (s *HTTPServer) handleSystem(w http.ResponseWriter, r *http.Request) {
 	numGoroutines := runtime.NumGoroutine()
 	numCPU := runtime.NumCPU()
 
-	s.renderHeader(w, "System Introspection", shortName, "system")
-
-	// Render runtime stats
-	fmt.Fprintf(w, `
-      <div class="card shadow-sm mb-4">
-        <div class="card-header bg-info text-white">Go Runtime Statistics</div>
-        <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-sm table-hover">
-              <tbody>
-                <tr><th class="w-25">Available CPUs</th><td>%d</td></tr>
-                <tr><th>Active Goroutines</th><td>%d</td></tr>
-                <tr><th>Allocated Memory (Alloc)</th><td>%d bytes (%.2f MB)</td></tr>
-                <tr><th>Total Allocated (TotalAlloc)</th><td>%d bytes (%.2f MB)</td></tr>
-                <tr><th>System Memory (Sys)</th><td>%d bytes (%.2f MB)</td></tr>
-                <tr><th>Number of GCs</th><td>%d</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-	`,
-		numCPU,
-		numGoroutines,
-		m.Alloc, float64(m.Alloc)/(1024*1024),
-		m.TotalAlloc, float64(m.TotalAlloc)/(1024*1024),
-		m.Sys, float64(m.Sys)/(1024*1024),
-		m.NumGC)
-
-	// Check if a stack dump was requested
-	if r.URL.Query().Get("dump") == "goroutines" {
-		fmt.Fprintf(w, `
-      <div class="card shadow-sm mb-4">
-        <div class="card-header bg-warning text-dark">
-          Goroutine Stack Dump
-          <a href="/system" class="btn btn-sm btn-outline-dark float-end">Clear Dump</a>
-        </div>
-        <div class="card-body">
-          <pre class="small bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto;"><code>`)
-
-		pprof.Lookup("goroutine").WriteTo(w, 1)
-
-		fmt.Fprintf(w, `</code></pre>
-        </div>
-      </div>`)
-	} else {
-		fmt.Fprintf(w, `
-      <div class="card shadow-sm mb-4 border-warning">
-        <div class="card-body text-center">
-          <p class="mb-3">Need to debug a deadlock or performance issue?</p>
-          <a href="/system?dump=goroutines" class="btn btn-warning">Generate Goroutine Stack Dump</a>
-        </div>
-      </div>`)
+	data := SystemData{
+		BaseData: BaseData{
+			Title:     "System Introspection",
+			AgentName: shortName,
+			ActiveNav: "system",
+		},
+		NumCPU:        numCPU,
+		NumGoroutines: numGoroutines,
+		Alloc:         m.Alloc,
+		AllocMB:       float64(m.Alloc) / (1024 * 1024),
+		TotalAlloc:    m.TotalAlloc,
+		TotalAllocMB:  float64(m.TotalAlloc) / (1024 * 1024),
+		Sys:           m.Sys,
+		SysMB:         float64(m.Sys) / (1024 * 1024),
+		NumGC:         m.NumGC,
 	}
 
-	s.renderFooter(w)
+	if r.URL.Query().Get("dump") == "goroutines" {
+		data.ShowDump = true
+
+		// Capture stack dump
+		var sb strings.Builder
+		pprof.Lookup("goroutine").WriteTo(&sb, 1)
+		data.Dump = sb.String()
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "system.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleUserAPIShutdown(w http.ResponseWriter, r *http.Request) {

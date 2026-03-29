@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.Title}} - {{.AgentName}}</title>
+    <link href="/static/bootstrap.min.css" rel="stylesheet">
+  </head>
+  <body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+      <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">Synod Paxos Agent: {{.AgentName}}</span>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+            <li class="nav-item"><a class="nav-link {{if eq .ActiveNav "status"}}active{{end}}" href="/">Status</a></li>
+            <li class="nav-item"><a class="nav-link {{if eq .ActiveNav "store"}}active{{end}}" href="/store">KV Store</a></li>
+            <li class="nav-item"><a class="nav-link {{if eq .ActiveNav "messages"}}active{{end}}" href="/messages">Messages</a></li>
+            <li class="nav-item"><a class="nav-link {{if eq .ActiveNav "peers"}}active{{end}}" href="/peers">Peers</a></li>
+            <li class="nav-item"><a class="nav-link {{if eq .ActiveNav "userapi"}}active{{end}}" href="/userapi">User API</a></li>
+            <li class="nav-item"><a class="nav-link {{if eq .ActiveNav "system"}}active{{end}}" href="/system">System</a></li>
+            <li class="nav-item"><a class="nav-link {{if eq .ActiveNav "grpc"}}active{{end}}" href="/grpc">gRPC Status</a></li>
+          </ul>
+          <div class="dropdown">
+            <button class="btn btn-outline-light dropdown-toggle btn-sm" type="button" id="reloadDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+              Reload: <span id="reloadLabel">1m</span>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark" aria-labelledby="reloadDropdown">
+              <li><a class="dropdown-item" href="#" onclick="setReload(1000)">1s</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(10000)">10s</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(30000)">30s</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(60000)">1m</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(300000)">5m</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(600000)">10m</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(1200000)">20m</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(1800000)">30m</a></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(3600000)">1h</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item" href="#" onclick="setReload(0)">Off</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </nav>
+    <div class="container">
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">Peer Mapping</div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <thead>
+                <tr>
+                  <th>Short Name</th><th>Agent ID</th><th>Endpoints</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{range .Peers}}
+                <tr>
+                  <td>{{.Label}}</td>
+                  <td><small class="text-muted">{{.AgentID}}</small></td>
+                  <td>{{.Endpoints}}</td>
+                </tr>
+                {{end}}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-secondary text-white">Recent Messages</div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <thead>
+                <tr>
+                  <th>ID</th><th>Time</th><th>Type</th><th>Sender</th><th>Receiver</th><th>Request</th><th>Reply</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{range .Messages}}
+                <tr>
+                  <td>{{.ID}}</td>
+                  <td><small class="text-nowrap">{{.Timestamp}}</small></td>
+                  <td><span class="badge bg-info text-dark">{{.Type}}</span></td>
+                  <td>{{.Sender}}</td>
+                  <td>{{.Receiver}}</td>
+                  <td>{{.Request}}</td>
+                  <td>{{.Reply}}</td>
+                </tr>
+                {{end}}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="/static/bootstrap.bundle.min.js"></script>
+    <script>
+      function setReload(ms) {
+        localStorage.setItem('reloadInterval', ms);
+        location.reload();
+      }
+      (function() {
+        const ms = parseInt(localStorage.getItem('reloadInterval')) ?? 60000;
+        const labelMap = {
+          1000: '1s', 10000: '10s', 30000: '30s', 60000: '1m',
+          300000: '5m', 600000: '10m', 1200000: '20m', 1800000: '30m',
+          3600000: '1h', 0: 'Off'
+        };
+        const label = labelMap[ms] || (ms > 0 ? (ms/1000 + 's') : 'Off');
+        document.getElementById('reloadLabel').innerText = label;
+        if (ms > 0) {
+          setTimeout(() => location.reload(), ms);
+        }
+      })();
+    </script>
+  </body>
+</html>
