@@ -132,7 +132,7 @@ func (c *Cell) SetPeers(peers []PeerClient) {
 	c.proposer = NewProposer(c.agentID, peers, c.acceptor)
 }
 
-func (c *Cell) Propose(ctx context.Context, key string, value []byte) error {
+func (c *Cell) Propose(ctx context.Context, key string, value []byte, qt QuorumType) error {
 	bo := backoff.New()
 	bo.MaxElapsedTime = 2 * time.Minute
 
@@ -153,7 +153,7 @@ func (c *Cell) Propose(ctx context.Context, key string, value []byte) error {
 
 		glog.Infof("Cell(%s): Proposing data for %s", c.agentID, instanceKey)
 
-		chosenValue, err := c.proposer.Propose(ctx, instanceKey, value)
+		chosenValue, err := c.proposer.Propose(ctx, instanceKey, value, qt)
 		if err != nil {
 			return err
 		}
@@ -215,7 +215,7 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 
 		glog.Infof("Cell(%s): Proposing membership for %s", c.agentID, instanceKey)
 
-		chosenValue, err := c.proposer.Propose(ctx, instanceKey, newVal)
+		chosenValue, err := c.proposer.Propose(ctx, instanceKey, newVal, QuorumMajority)
 		if err != nil {
 			return err
 		}
@@ -271,7 +271,7 @@ func (c *Cell) ProposeRemoval(ctx context.Context, agentID string) error {
 
 		glog.Infof("Cell(%s): Proposing removal for %s", c.agentID, agentID)
 
-		chosenValue, err := c.proposer.Propose(ctx, instanceKey, newVal)
+		chosenValue, err := c.proposer.Propose(ctx, instanceKey, newVal, QuorumMajority)
 		if err != nil {
 			return err
 		}

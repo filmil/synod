@@ -8,6 +8,7 @@ go_test(
         "ping_test.go",
     ],
     deps = [
+        "//internal/backoff",
         "//internal/constants",
         "//internal/paxos",
         "//internal/server",

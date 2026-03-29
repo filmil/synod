@@ -594,7 +594,7 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 
-	if err := s.cell.Propose(ctx, key, []byte(val)); err != nil {
+	if err := s.cell.Propose(ctx, key, []byte(val), paxos.QuorumMajority); err != nil {
 		glog.Errorf("HTTP: Proposal failed: %v", err)
 		http.Error(w, fmt.Sprintf("Paxos proposal failed: %v", err), http.StatusInternalServerError)
 		return
@@ -820,7 +820,7 @@ func (s *HTTPServer) handleUserAPIWrite(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 
 	userAPI := userapi.New(s.cell)
-	resp, err := userAPI.CompareAndWrite(ctx, key, []byte(oldVal), []byte(newVal))
+	resp, err := userAPI.CompareAndWrite(ctx, key, []byte(oldVal), []byte(newVal), paxos.QuorumMajority)
 
 	if err != nil {
 		s.completeOngoingRequest(reqID, false, err.Error())

@@ -41,6 +41,11 @@ func (b *Backoff) Retry(ctx context.Context, name string, fn func() error) error
 			return nil
 		}
 
+		if IsPermanent(err) {
+			glog.Infof("backoff [%s]: attempt %d failed with permanent error: %v", name, attempt, err)
+			return err
+		}
+
 		glog.Infof("backoff [%s]: attempt %d failed with error: %v", name, attempt, err)
 
 		if b.MaxElapsedTime > 0 && time.Since(startTime) > b.MaxElapsedTime {
@@ -68,4 +73,50 @@ func (b *Backoff) Retry(ctx context.Context, name string, fn func() error) error
 		}
 		attempt++
 	}
+}
+
+// PermanentError is an error that should not be retried.
+type PermanentError struct {
+	Err error
+}
+
+func (e *PermanentError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *PermanentError) Unwrap() error {
+	return e.Err
+}
+
+// Permanent wraps an error to indicate it should not be retried.
+func Permanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &PermanentError{Err: err}
+}
+
+// IsPermanent returns true if the error is a PermanentError.
+func IsPermanent(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check if it's a PermanentError directly or wrapped.
+	curr := err
+	for curr != nil {
+		if _, ok := curr.(*PermanentError); ok {
+			return true
+		}
+		// In Go 1.13+, we should use errors.Unwrap or errors.As.
+		// Since we don't have errors package imported, we can use a simple interface check.
+		type unwrapper interface {
+			Unwrap() error
+		}
+		if u, ok := curr.(unwrapper); ok {
+			curr = u.Unwrap()
+		} else {
+			break
+		}
+	}
+	return false
 }
