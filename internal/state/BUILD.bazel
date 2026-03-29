@@ -12,3 +12,14 @@ go_library(
         "@com_github_mattn_go_sqlite3//:go-sqlite3",
     ],
 )
+
+load("@rules_go//go:def.bzl", "go_test")
+
+go_test(
+    name = "state_test",
+    srcs = ["state_test.go"],
+    embed = [":state"],
+    deps = [
+        "//proto/paxos/v1:paxosv1_go_proto",
+    ],
+)
