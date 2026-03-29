@@ -33,6 +33,7 @@ type PeerClient interface {
 	Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error)
 	GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeerEndpointsRequest) (*paxosv1.GetPeerEndpointsResponse, error)
 	AgentID() string
+	Close() error
 }
 
 type PeerFactory func(agentID, address string) (PeerClient, error)
@@ -354,6 +355,17 @@ func (c *Cell) refreshPeers(ctx context.Context) {
 			}
 		}
 	}
+
+	// Close old peers that are no longer active
+	for id, p := range c.peers {
+		if _, ok := newPeers[id]; !ok {
+			glog.Infof("Cell(%s): Closing connection to removed peer %s", c.agentID, id)
+			if err := p.Close(); err != nil {
+				glog.Errorf("Cell(%s): Error closing connection to peer %s: %v", c.agentID, id, err)
+			}
+		}
+	}
+
 	c.peers = newPeers
 	c.proposer = NewProposer(c.agentID, peerList, c.acceptor)
 }

@@ -78,6 +78,10 @@ func (m *mockPeer) AgentID() string {
 	return m.agentID
 }
 
+func (m *mockPeer) Close() error {
+	return nil
+}
+
 func TestProposer_Success(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "proposer-test-*")
 	if err != nil {
