@@ -50,7 +50,30 @@ func (p *Proposer) Propose(ctx context.Context, key string, value []byte, qt Quo
 	required := p.required(qt)
 
 	// Phase 1: Prepare
-	promises := p.sendPrepare(ctx, key, proposalID, nonce)
+	promises, rejections := p.sendPrepare(ctx, key, proposalID, nonce)
+
+	// Fast-forward our proposal number to be strictly greater than any promised number we saw
+	var highestPromised uint64
+	for _, resp := range promises {
+		if resp.HighestPromisedId != nil && resp.HighestPromisedId.Number > highestPromised {
+			highestPromised = resp.HighestPromisedId.Number
+		}
+	}
+	for _, resp := range rejections {
+		if resp.HighestPromisedId != nil && resp.HighestPromisedId.Number > highestPromised {
+			highestPromised = resp.HighestPromisedId.Number
+		}
+	}
+
+	if highestPromised >= p.nextNum {
+		p.mu.Lock()
+		if highestPromised >= p.nextNum {
+			p.nextNum = highestPromised + 1
+			glog.Infof("Proposer(%s): Fast-forwarded next proposal number to %d based on observed promises", p.agentID, p.nextNum)
+		}
+		p.mu.Unlock()
+	}
+
 	if len(promises) < required {
 		glog.Warningf("Proposer(%s): Phase 1 failed for key %s: no quorum (got %d, need %d)", p.agentID, key, len(promises), required)
 		return nil, fmt.Errorf("failed to reach quorum in Phase 1 (Prepare): got %d, need %d", len(promises), required)
@@ -68,10 +91,32 @@ func (p *Proposer) Propose(ctx context.Context, key string, value []byte, qt Quo
 	}
 
 	// Phase 2: Accept
-	acceptedCount := p.sendAccept(ctx, key, proposalID, value, nonce)
-	if acceptedCount < required {
-		glog.Warningf("Proposer(%s): Phase 2 failed for key %s: no quorum (got %d, need %d)", p.agentID, key, acceptedCount, required)
-		return nil, fmt.Errorf("failed to reach quorum in Phase 2 (Accept): got %d, need %d", acceptedCount, required)
+	accepts, acceptRejections := p.sendAccept(ctx, key, proposalID, value, nonce)
+
+	highestPromised = 0
+	for _, resp := range accepts {
+		if resp.HighestPromisedId != nil && resp.HighestPromisedId.Number > highestPromised {
+			highestPromised = resp.HighestPromisedId.Number
+		}
+	}
+	for _, resp := range acceptRejections {
+		if resp.HighestPromisedId != nil && resp.HighestPromisedId.Number > highestPromised {
+			highestPromised = resp.HighestPromisedId.Number
+		}
+	}
+
+	if highestPromised >= p.nextNum {
+		p.mu.Lock()
+		if highestPromised >= p.nextNum {
+			p.nextNum = highestPromised + 1
+			glog.Infof("Proposer(%s): Fast-forwarded next proposal number to %d based on observed accept rejections", p.agentID, p.nextNum)
+		}
+		p.mu.Unlock()
+	}
+
+	if len(accepts) < required {
+		glog.Warningf("Proposer(%s): Phase 2 failed for key %s: no quorum (got %d, need %d)", p.agentID, key, len(accepts), required)
+		return nil, fmt.Errorf("failed to reach quorum in Phase 2 (Accept): got %d, need %d", len(accepts), required)
 	}
 
 	glog.Infof("Proposer(%s): Consensus reached for key %s", p.agentID, key)
@@ -90,9 +135,10 @@ func (p *Proposer) quorum() int {
 	return p.required(QuorumMajority)
 }
 
-func (p *Proposer) sendPrepare(ctx context.Context, key string, id *paxosv1.ProposalID, nonce string) []*paxosv1.PromiseResponse {
+func (p *Proposer) sendPrepare(ctx context.Context, key string, id *paxosv1.ProposalID, nonce string) ([]*paxosv1.PromiseResponse, []*paxosv1.PromiseResponse) {
 	var mu sync.Mutex
-	var results []*paxosv1.PromiseResponse
+	var promises []*paxosv1.PromiseResponse
+	var rejections []*paxosv1.PromiseResponse
 	var wg sync.WaitGroup
 
 	req := &paxosv1.PrepareRequest{
@@ -104,8 +150,12 @@ func (p *Proposer) sendPrepare(ctx context.Context, key string, id *paxosv1.Prop
 
 	// Prepare self
 	resp, err := p.acceptor.Prepare(ctx, req)
-	if err == nil && resp != nil && resp.Promised {
-		results = append(results, resp)
+	if err == nil && resp != nil {
+		if resp.Promised {
+			promises = append(promises, resp)
+		} else {
+			rejections = append(rejections, resp)
+		}
 	}
 
 	for _, peer := range p.peers {
@@ -117,20 +167,25 @@ func (p *Proposer) sendPrepare(ctx context.Context, key string, id *paxosv1.Prop
 				glog.V(2).Infof("Prepare failed for peer %s: %v", pc.AgentID(), err)
 				return
 			}
-			if resp != nil && resp.Promised {
+			if resp != nil {
 				mu.Lock()
-				results = append(results, resp)
+				if resp.Promised {
+					promises = append(promises, resp)
+				} else {
+					rejections = append(rejections, resp)
+				}
 				mu.Unlock()
 			}
 		}(peer)
 	}
 	wg.Wait()
-	return results
+	return promises, rejections
 }
 
-func (p *Proposer) sendAccept(ctx context.Context, key string, id *paxosv1.ProposalID, value []byte, nonce string) int {
+func (p *Proposer) sendAccept(ctx context.Context, key string, id *paxosv1.ProposalID, value []byte, nonce string) ([]*paxosv1.AcceptedResponse, []*paxosv1.AcceptedResponse) {
 	var mu sync.Mutex
-	count := 0
+	var accepts []*paxosv1.AcceptedResponse
+	var rejections []*paxosv1.AcceptedResponse
 	var wg sync.WaitGroup
 
 	req := &paxosv1.AcceptRequest{
@@ -143,8 +198,12 @@ func (p *Proposer) sendAccept(ctx context.Context, key string, id *paxosv1.Propo
 
 	// Accept self
 	resp, err := p.acceptor.Accept(ctx, req)
-	if err == nil && resp != nil && resp.Accepted {
-		count++
+	if err == nil && resp != nil {
+		if resp.Accepted {
+			accepts = append(accepts, resp)
+		} else {
+			rejections = append(rejections, resp)
+		}
 	}
 
 	for _, peer := range p.peers {
@@ -156,13 +215,17 @@ func (p *Proposer) sendAccept(ctx context.Context, key string, id *paxosv1.Propo
 				glog.V(2).Infof("Accept failed for peer %s: %v", pc.AgentID(), err)
 				return
 			}
-			if resp != nil && resp.Accepted {
+			if resp != nil {
 				mu.Lock()
-				count++
+				if resp.Accepted {
+					accepts = append(accepts, resp)
+				} else {
+					rejections = append(rejections, resp)
+				}
 				mu.Unlock()
 			}
 		}(peer)
 	}
 	wg.Wait()
-	return count
+	return accepts, rejections
 }

@@ -294,3 +294,9 @@ info for peers.
 - Key peers by their UUID. This is not safe, but we will handle safety later.
 - Do not remove this info from the HTTP display, only source them from the
   ephemeral map.
+
+### B.3: pick a number higher than Promised
+
+When a response to a proposal comes back and has a Promised number, the next
+proposal must carry a number higher than Promised. If you receive multiple
+Promised numbers, pick a number higher than all of them.

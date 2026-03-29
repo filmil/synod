@@ -152,3 +152,65 @@ func TestProposer_NoQuorum(t *testing.T) {
 		t.Fatalf("Expected Propose to fail due to lack of quorum")
 	}
 }
+
+func TestProposer_FastForwardNextNum(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "proposer-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	store, err := state.NewStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	agentID := "proposer-agent"
+	acceptor := NewAcceptor(agentID, store)
+
+	// Peers reject with a higher Promised ID
+	peers := []PeerClient{
+		&mockPeer{
+			agentID: "peer-1",
+			prepareResp: &paxosv1.PromiseResponse{
+				Promised: false,
+				AgentId:  "peer-1",
+				HighestPromisedId: &paxosv1.ProposalID{
+					Number:  42,
+					AgentId: "other-agent",
+				},
+			},
+		},
+		&mockPeer{
+			agentID: "peer-2",
+			prepareResp: &paxosv1.PromiseResponse{
+				Promised: false,
+				AgentId:  "peer-2",
+				HighestPromisedId: &paxosv1.ProposalID{
+					Number:  15,
+					AgentId: "another-agent",
+				},
+			},
+		},
+	}
+
+	p := NewProposer(agentID, peers, acceptor)
+	ctx := context.Background()
+
+	// Initial nextNum is 1
+	if p.nextNum != 1 {
+		t.Fatalf("Expected initial nextNum to be 1, got %d", p.nextNum)
+	}
+
+	_, err = p.Propose(ctx, "/test/key", []byte("val"), QuorumMajority)
+	
+	// Phase 1 should fail because peer-1 rejected and quorum is 2
+	if err == nil {
+		t.Fatalf("Expected Propose to fail due to lack of quorum")
+	}
+
+	// But nextNum should be fast-forwarded to 43 (highest Promised ID seen + 1)
+	if p.nextNum != 43 {
+		t.Fatalf("Expected nextNum to fast-forward to 43, got %d", p.nextNum)
+	}
+}
