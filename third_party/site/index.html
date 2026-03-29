@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synod - Distributed Consensus, Simplified</title>
+  <link rel="stylesheet" href="bootstrap.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Ambient Glow Effects -->
+  <div class="bg-glow"></div>
+  <div class="bg-glow-right"></div>
+
+  <!-- Navigation -->
+  <nav class="navbar navbar-expand-lg sticky-top">
+    <div class="container">
+      <a class="navbar-brand d-flex align-items-center" href="#">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="me-2 text-primary" viewBox="0 0 16 16">
+          <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm1.062 4.312a.5.5 0 1 1 .75-.624l3 3.5a.5.5 0 0 1 0 .624l-3 3.5a.5.5 0 1 1-.75-.624L11.688 8 9.062 4.312zM5.5 12.5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1-.5-.5v-2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v2z"/>
+        </svg>
+        SYNOD
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item"><a class="nav-link" href="#features">Features</a></li>
+          <li class="nav-item"><a class="nav-link" href="#how-it-works">How it works</a></li>
+          <li class="nav-item"><a class="nav-link" href="#run-it">Run It</a></li>
+          <li class="nav-item">
+            <a class="btn btn-outline-primary btn-sm ms-3 mt-1" href="https://github.com/filmil/synod">GitHub</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="container">
+      <div class="row align-items-center">
+        <div class="col-lg-6 mb-5 mb-lg-0">
+          <h1 class="hero-title">A Rock-Solid Paxos Coordination Agent</h1>
+          <p class="hero-subtitle">Synod provides a distributed, highly-available Key-Value store backed by SQLite. Built in Go. Shipped with an intuitive web dashboard, hierarchical locks, and dynamic cluster membership.</p>
+          <div class="d-flex gap-3">
+            <a href="#run-it" class="btn btn-primary btn-lg px-4 rounded-pill">Get Started</a>
+            <a href="#features" class="btn btn-outline-light btn-lg px-4 rounded-pill">Explore Features</a>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="hero-image-wrapper">
+            <img src="dashboard-mock.svg" class="img-fluid hero-image" alt="Synod Dashboard Interface">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section id="features" class="features-section">
+    <div class="container">
+      <div class="text-center mb-5">
+        <h2 class="fw-bold mb-3">Engineered for Reliability</h2>
+        <p class="text-muted w-75 mx-auto">Synod uses the battle-tested Paxos consensus algorithm to ensure that your data is consistent across the entire network, even when individual nodes fail.</p>
+      </div>
+      
+      <div class="row g-4">
+        <!-- Feature 1 -->
+        <div class="col-md-6 col-lg-4">
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            </div>
+            <h3>Distributed Key-Value</h3>
+            <p>A unified Key-Value store bound to unix-path keys. Values are replicated, versioned, and managed using standard Paxos consensus proposals.</p>
+          </div>
+        </div>
+
+        <!-- Feature 2 -->
+        <div class="col-md-6 col-lg-4">
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+            </div>
+            <h3>Hierarchical Locking</h3>
+            <p>Secure specific paths with built-in distributed locks. Support for `_lockable` segments enables top-down hierarchical exclusion out of the box.</p>
+          </div>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="col-md-6 col-lg-4">
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            </div>
+            <h3>Dynamic Membership</h3>
+            <p>Nodes can dynamically join the cluster via gRPC. Network membership is managed within the KV Store using optimistic concurrency.</p>
+          </div>
+        </div>
+
+        <!-- Feature 4 -->
+        <div class="col-md-6 col-lg-4">
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            </div>
+            <h3>Built-in Web Dashboard</h3>
+            <p>Every node ships with an embedded HTTP dashboard. Inspect local state, read raw key-values, and monitor real-time RPC messages.</p>
+          </div>
+        </div>
+
+        <!-- Feature 5 -->
+        <div class="col-md-6 col-lg-4">
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            </div>
+            <h3>SQLite Persistence</h3>
+            <p>Durable storage is handled by SQLite natively. Agent states, ledgers, and logs are automatically backed up to your specified state directory.</p>
+          </div>
+        </div>
+
+        <!-- Feature 6 -->
+        <div class="col-md-6 col-lg-4">
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            </div>
+            <h3>Quorum Read/Writes</h3>
+            <p>Customize your consistency! Reads support Local, Majority, and All quorums. Compare-and-Swap (CAS) semantics ensure robust atomic updates.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How It Works & Run Section -->
+  <section id="run-it" class="py-5 my-5">
+    <div class="container">
+      <div class="row align-items-center">
+        <div class="col-lg-5 mb-4 mb-lg-0">
+          <h2 class="fw-bold mb-4">Start a Synod Cluster in Seconds</h2>
+          <p class="text-muted mb-4">Synod is built seamlessly with Bazel. Simply define your local state directories and start your agents. Provide a peer endpoint to automatically negotiate cluster joining using Paxos.</p>
+          <ul class="list-unstyled text-muted">
+            <li class="mb-2">✔️ Dynamic Port Selection</li>
+            <li class="mb-2">✔️ Periodic Health Pings</li>
+            <li class="mb-2">✔️ Background Peer Synchronization</li>
+            <li class="mb-2">✔️ Graceful Lame-Duck Shutdowns</li>
+          </ul>
+        </div>
+        <div class="col-lg-7">
+          <div class="code-window">
+            <div class="code-header">
+              <div class="code-dot dot-red"></div>
+              <div class="code-dot dot-yel"></div>
+              <div class="code-dot dot-grn"></div>
+            </div>
+            <div class="code-body"><span class="prompt">$</span> <span class="command">mkdir -p /tmp/agent1 /tmp/agent2</span>
+<span class="prompt">$</span> <span class="command">bazel run //cmd/agent -- \
+  --state_dir="/tmp/agent1" \
+  --grpc_addr=":50051" \
+  --http_addr=":8081"</span>
+<span class="output">I0329 05:40:12.123 1234 main.go] Synod agent is up and running
+I0329 05:40:12.123 1234 main.go] Listening on :50051</span>
+
+<span class="prompt">$</span> <span class="command">bazel run //cmd/agent -- \
+  --state_dir="/tmp/agent2" \
+  --grpc_addr=":50052" \
+  --http_addr=":8082" \
+  --peer="127.0.0.1:50051"</span>
+<span class="output">I0329 05:40:15.823 1256 main.go] Negotiating cluster join...
+I0329 05:40:15.912 1256 main.go] Successfully joined cluster!</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="text-center text-muted">
+    <div class="container">
+      <p class="mb-1">&copy; 2026 Synod Authors. Open source under the MIT License.</p>
+      <p class="small">Built with Go, gRPC, SQLite, and Bazel.</p>
+    </div>
+  </footer>
+
+  <script src="bootstrap.bundle.min.js"></script>
+</body>
+</html>

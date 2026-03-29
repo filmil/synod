@@ -1,0 +1,12 @@
+filegroup(
+    name = "site",
+    srcs = [
+        "LICENSE",
+        "bootstrap.bundle.min.js",
+        "bootstrap.min.css",
+        "dashboard-mock.svg",
+        "index.html",
+        "styles.css",
+    ],
+    visibility = ["//visibility:public"],
+)
