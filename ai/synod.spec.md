@@ -130,6 +130,11 @@
     - Once that is done, the agent is admitted and can take part in decisions.
       Else, that agent will be ignored.
 
+#### Update C.2: Auto-rejoin
+
+- Add a periodic task which checks if this agent is in the set of peers.
+- If it isn't, proposes re-adding self.
+
 #### Update C.1:
 
 - Periodically (flag-configurable, default 2 minutes) ping all peers to figure
@@ -283,6 +288,12 @@ treat writes.
   towards the end of the path.
 - Update the HTTP endpoint panel to include forms for these new lock operations.
 
+#### Feature A.3: Graceful Shutdown
+
+- Add a user API command to shut down a node, in the API library as well as the HTTP frontend.
+- An agent which is being shut down sends a proposal to remove self.
+- Then it enters lame duck mode for 1 minute where it does not respond to requests and takes no new connections.
+- After 1 minute, the agent process shuts down.
 
 
 ## Bugs

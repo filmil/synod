@@ -42,6 +42,9 @@ service UserService {
 
   // Renew a lock on a key path.
   rpc RenewLock(RenewLockRequest) returns (RenewLockResponse) {}
+
+  // Shut down the node.
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse) {}
 }
 
 enum ReadQuorum {
@@ -204,6 +207,14 @@ message RenewLockRequest {
 }
 
 message RenewLockResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ShutdownRequest {
+}
+
+message ShutdownResponse {
   bool success = 1;
   string message = 2;
 }

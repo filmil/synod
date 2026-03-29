@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/filmil/synod/internal/backoff"
 	"github.com/filmil/synod/internal/paxos"
@@ -131,3 +132,29 @@ func (a *UserAPI) CompareAndWrite(ctx context.Context, key string, oldValue, new
 		Version: version,
 	}, nil
 }
+
+// Shutdown initiates a graceful shutdown sequence.
+// It proposes the removal of this node from the cluster and signals the main server to enter lame duck mode.
+func (a *UserAPI) Shutdown(ctx context.Context, req *paxosv1.ShutdownRequest) (*paxosv1.ShutdownResponse, error) {
+	agentID, _, err := a.cell.GetStore().GetAgentID()
+	if err != nil {
+		return &paxosv1.ShutdownResponse{Success: false, Message: fmt.Sprintf("failed to get agent ID: %v", err)}, nil
+	}
+
+	glog.Infof("UserAPI: Shutdown requested. Proposing removal of agent %s", agentID)
+
+	// Attempt to propose our own removal. If it fails, we still proceed with shutdown.
+	if err := a.cell.ProposeRemoval(ctx, agentID); err != nil {
+		glog.Warningf("UserAPI: Failed to propose removal during shutdown: %v", err)
+	}
+
+	// Trigger the actual process shutdown asynchronously to allow this RPC to return successfully.
+	go func() {
+		// Small delay to allow the gRPC response to be written to the wire
+		time.Sleep(500 * time.Millisecond)
+		a.cell.TriggerShutdown()
+	}()
+
+	return &paxosv1.ShutdownResponse{Success: true, Message: "Shutdown initiated. Entering lame duck mode."}, nil
+}
+
