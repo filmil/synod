@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"github.com/filmil/synod/internal/constants"
 	"context"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/server"
+	"github.com/filmil/synod/internal/userapi"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
@@ -33,6 +35,7 @@ func TestIntegration_5Agents(t *testing.T) {
 	defer os.RemoveAll(tmpDir0)
 	addr0 := "127.0.0.1:0"
 	agents[0] = newAgentInstance(t, "agent-0", tmpDir0, addr0)
+	defer agents[0].stop()
 	go agents[0].run()
 
 	// Wait for agent-0 to be up and get its actual address
@@ -62,6 +65,7 @@ func TestIntegration_5Agents(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 
 		agents[i] = newAgentInstance(t, fmt.Sprintf("agent-%d", i), tmpDir, "127.0.0.1:0")
+		defer agents[i].stop()
 		go agents[i].run()
 		time.Sleep(500 * time.Millisecond) // Wait for server to be up
 
@@ -102,15 +106,15 @@ func TestIntegration_5Agents(t *testing.T) {
 
 		// Download consensus value of peers
 		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-		kvResp, err := client.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
+		kvResp, err := client.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: constants.PeersKey})
 		cancel()
 		if err != nil {
 			t.Fatalf("Failed to get peers from join node: %v", err)
 		} else if kvResp.Value != nil {
-			if err := agents[i].store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: resp.AgentId}, kvResp.Value); err != nil {
+			if err := agents[i].store.SetAcceptedValue(constants.PeersKey, &paxosv1.ProposalID{Number: kvResp.Version, AgentId: resp.AgentId}, kvResp.Value); err != nil {
 				t.Fatalf("Failed to set accepted value for peers: %v", err)
 			}
-			if err := agents[i].store.CommitKV("/_internal/peers", kvResp.Value, "membership", kvResp.Version); err != nil {
+			if err := agents[i].store.CommitKV(constants.PeersKey, kvResp.Value, "membership", kvResp.Version); err != nil {
 				t.Fatalf("Failed to commit peers KV: %v", err)
 			}
 			agents[i].cell.ApplyMembershipChange(kvResp.Value)
@@ -126,11 +130,7 @@ func TestIntegration_5Agents(t *testing.T) {
 		cancel()
 	}
 
-	// Start sync loops for all agents
-	for i := 0; i < numAgents; i++ {
-		agents[i].cell.StartSyncLoop(context.Background(), 1*time.Second)
-		agents[i].cell.StartEndpointSyncLoop(context.Background(), 2*time.Second)
-	}
+
 
 	// Wait for all agents to sync up the membership
 	time.Sleep(5 * time.Second)
@@ -234,6 +234,11 @@ func newAgentInstance(t *testing.T, id, dir, addr string) *agentInstance {
 	cell := paxos.NewCell(id, store, acceptor, peerFactory, "", "")
 	srv := server.NewPaxosServer(id, store, acceptor, cell)
 
+	uAPI := userapi.New(cell)
+	cell.SetLockChecker(func(ctx context.Context, key string) error {
+		return uAPI.CheckLocks(ctx, key)
+	})
+
 	return &agentInstance{
 		id:    id,
 		dir:   dir,
@@ -262,6 +267,11 @@ func (a *agentInstance) run() {
 	a.httpURL = fmt.Sprintf("http://%s", httpLis.Addr().String())
 
 	a.cell.SetSelfAddress(a.grpcAddr, a.httpURL)
+
+	// Start agent background loops
+	a.cell.StartSyncLoop(ctx, 1*time.Second)
+	a.cell.StartPingLoop(ctx, 2*time.Second)
+	a.cell.StartEndpointSyncLoop(ctx, 2*time.Second)
 
 	go func() {
 		server.RunGRPCServer(ctx, grpcLis, a.srv)

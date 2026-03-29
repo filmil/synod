@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/filmil/synod/internal/constants"
+
 	"github.com/filmil/synod/internal/backoff"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
@@ -53,6 +55,9 @@ type Cell struct {
 
 	selfGRPCAddr string
 	selfHTTPURL  string
+
+	// Optional hook for lock checking during Propose
+	lockChecker func(ctx context.Context, key string) error
 }
 
 func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory PeerFactory, selfGRPCAddr, selfHTTPURL string) *Cell {
@@ -74,6 +79,10 @@ func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory Pee
 	}
 	c.proposer = NewProposer(agentID, nil, acceptor)
 	return c
+}
+
+func (c *Cell) SetLockChecker(checker func(ctx context.Context, key string) error) {
+	c.lockChecker = checker
 }
 
 func (c *Cell) SetSelfAddress(grpcAddr, httpURL string) {
@@ -128,6 +137,13 @@ func (c *Cell) Propose(ctx context.Context, key string, value []byte) error {
 	bo.MaxElapsedTime = 2 * time.Minute
 
 	return bo.Retry(ctx, "Propose", func() error {
+		// Verify locks before proceeding
+		if c.lockChecker != nil {
+			if err := c.lockChecker(ctx, key); err != nil {
+				return fmt.Errorf("write refused by lock policy: %w", err)
+			}
+		}
+
 		_, _, version, _, err := c.store.GetKVEntry(key)
 		if err != nil {
 			return fmt.Errorf("failed to get KV entry for %s: %w", key, err)
@@ -155,7 +171,7 @@ func (c *Cell) Propose(ctx context.Context, key string, value []byte) error {
 }
 
 func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state.PeerInfo) error {
-	key := "/_internal/peers"
+	key := constants.PeersKey
 	bo := backoff.New()
 	bo.MaxElapsedTime = 2 * time.Minute
 
@@ -219,7 +235,7 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 }
 
 func (c *Cell) ProposeRemoval(ctx context.Context, agentID string) error {
-	key := "/_internal/peers"
+	key := constants.PeersKey
 	bo := backoff.New()
 	bo.MaxElapsedTime = 2 * time.Minute
 
@@ -373,7 +389,7 @@ func (c *Cell) StartPingLoop(ctx context.Context, interval time.Duration) {
 }
 
 func (c *Cell) PingPeers(ctx context.Context) {
-	glog.V(2).Infof("Cell(%s): Pinging peers", c.agentID)
+	glog.V(3).Infof("Cell(%s): Pinging peers", c.agentID)
 	c.refreshPeers(ctx)
 
 	c.mu.Lock()
@@ -386,7 +402,7 @@ func (c *Cell) PingPeers(ctx context.Context) {
 	for _, p := range peers {
 		nonce := uuid.New().String()
 		pingCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
-		glog.V(2).Infof("Cell(%s): Pinging peer %s", c.agentID, p.AgentID())
+		glog.V(3).Infof("Cell(%s): Pinging peer %s", c.agentID, p.AgentID())
 		resp, err := p.Ping(pingCtx, &paxosv1.PingRequest{
 			AgentId:  c.agentID,
 			Nonce:    nonce,
@@ -539,7 +555,7 @@ func (c *Cell) syncMissingEndpoints(ctx context.Context) {
 	c.mu.Unlock()
 
 	if len(missing) == 0 || len(knownPeers) == 0 {
-		glog.V(2).Infof("Cell(%s): EndpointSync: Nothing to do or no one to ask", c.agentID)
+		glog.V(3).Infof("Cell(%s): EndpointSync: Nothing to do or no one to ask", c.agentID)
 		return
 	}
 

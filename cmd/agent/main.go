@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/filmil/synod/internal/constants"
 	"context"
 	"encoding/json"
 	"flag"
@@ -14,6 +15,7 @@ import (
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/server"
 	"github.com/filmil/synod/internal/state"
+	"github.com/filmil/synod/internal/userapi"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 )
@@ -90,6 +92,12 @@ func main() {
 	acceptor := paxos.NewAcceptor(agentID, store)
 	cell := paxos.NewCell(agentID, store, acceptor, peerFactory, finalGrpcAddr, fmt.Sprintf("http://%s", httpLis.Addr().String()))
 	paxosSrv := server.NewPaxosServer(agentID, store, acceptor, cell)
+	
+	// Create userAPI and inject the lock checking logic into the cell
+	uAPI := userapi.New(cell)
+	cell.SetLockChecker(func(ctx context.Context, key string) error {
+		return uAPI.CheckLocks(ctx, key)
+	})
 
 	var existingPeers map[string]state.PeerInfo
 	var joinClient *server.PaxosClient
@@ -99,7 +107,7 @@ func main() {
 		joinClient, err = server.NewPaxosClient("temp-peer", *peerAddr)
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			kvResp, err := joinClient.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
+			kvResp, err := joinClient.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: constants.PeersKey})
 			cancel()
 			if err == nil && kvResp.Value != nil {
 				json.Unmarshal(kvResp.Value, &existingPeers)
@@ -193,15 +201,15 @@ func main() {
 
 				// Download the consensus value of the list of peers
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				kvResp, err := joinClient.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
+				kvResp, err := joinClient.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: constants.PeersKey})
 				cancel()
 				if err != nil {
 					glog.Errorf("Failed to get peers from join node: %v", err)
 				} else if kvResp.Value != nil {
-					if err := store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: joinedAgentID}, kvResp.Value); err != nil {
+					if err := store.SetAcceptedValue(constants.PeersKey, &paxosv1.ProposalID{Number: kvResp.Version, AgentId: joinedAgentID}, kvResp.Value); err != nil {
 						glog.Errorf("Failed to set accepted value for peers: %v", err)
 					}
-					if err := store.CommitKV("/_internal/peers", kvResp.Value, "membership", kvResp.Version); err != nil {
+					if err := store.CommitKV(constants.PeersKey, kvResp.Value, "membership", kvResp.Version); err != nil {
 						glog.Errorf("Failed to commit peers KV: %v", err)
 					}
 					cell.ApplyMembershipChange(kvResp.Value)
