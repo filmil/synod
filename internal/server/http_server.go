@@ -302,23 +302,20 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(ids)
 
-	ephemeral := s.cell.GetEphemeralPeers()
-
 	for _, id := range ids {
 		label := id
 		if id == agentID {
 			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", id)
 		}
 		info := members[id]
-		eph := ephemeral[id]
 
 		httpLink := ""
-		if eph.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", eph.HTTPURL, eph.HTTPURL)
+		if info.HTTPURL != "" {
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
-		grpcAddr := eph.GRPCAddr
+		grpcAddr := info.GRPCAddr
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
@@ -375,23 +372,20 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(ids)
 
-	ephemeral := s.cell.GetEphemeralPeers()
-
 	for _, id := range ids {
 		info := members[id]
-		eph := ephemeral[id]
 		label := info.ShortName
 		if id == agentID {
 			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", label)
 		}
 
-		grpcAddr := eph.GRPCAddr
+		grpcAddr := info.GRPCAddr
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
 		endpoints := fmt.Sprintf("<code>%s</code>", grpcAddr)
-		if eph.HTTPURL != "" {
-			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", eph.HTTPURL, eph.HTTPURL)
+		if info.HTTPURL != "" {
+			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
 		}
 
 		data.Peers = append(data.Peers, Peer{
@@ -449,8 +443,6 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ephemeral := s.cell.GetEphemeralPeers()
-
 	data := PeersData{
 		BaseData: BaseData{
 			Title:     "Peers",
@@ -469,17 +461,16 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 
 	for _, id := range ids {
 		info := members[id]
-		eph := ephemeral[id]
 
-		grpcAddr := eph.GRPCAddr
+		grpcAddr := info.GRPCAddr
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
 		grpcURL := fmt.Sprintf("grpc://%s", grpcAddr)
 
 		httpLink := ""
-		if eph.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", eph.HTTPURL, eph.HTTPURL)
+		if info.HTTPURL != "" {
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}

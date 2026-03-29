@@ -303,6 +303,12 @@ treat writes.
 
 ## Bugs
 
+### B.4: Persist peer ports in membership
+
+- Update the data schema for membership to include the http port and grpc port of a node.
+- Remove ephemeral storage for the http port and grpc port.
+
+
 ### B.1: /api/command
 
 The 'api/command' page is rendered as text, not as HTML, fix.

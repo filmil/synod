@@ -231,6 +231,10 @@ func (s *Store) SetAcceptedValue(key string, id *paxosv1.ProposalID, value []byt
 type PeerInfo struct {
 	// ShortName is the human-readable name of the peer.
 	ShortName string `json:"short_name"`
+	// GRPCAddr is the gRPC host:port for the peer.
+	GRPCAddr  string `json:"grpc_addr"`
+	// HTTPURL is the HTTP dashboard URL for the peer.
+	HTTPURL   string `json:"http_url"`
 }
 
 // AddMember adds or updates a peer in the local membership list.

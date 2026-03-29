@@ -37,12 +37,12 @@ func TestIntegration_Locks(t *testing.T) {
 	}
 
 	addr0 := agents[0].grpcAddr
-	info0 := state.PeerInfo{ShortName: "agent-0"}
+	info0 := state.PeerInfo{ShortName: "agent-0", GRPCAddr: addr0, HTTPURL: agents[0].httpURL}
 	agents[0].store.AddMember("agent-0", info0)
 	agents[0].cell.ProposeMembership(context.Background(), "agent-0", info0)
 
 	for i := 1; i < numAgents; i++ {
-		infoI := state.PeerInfo{ShortName: fmt.Sprintf("agent-%d", i)}
+		infoI := state.PeerInfo{ShortName: fmt.Sprintf("agent-%d", i), GRPCAddr: agents[i].grpcAddr, HTTPURL: agents[i].httpURL}
 		agents[i].store.AddMember(agents[i].id, infoI)
 
 		client, _ := server.NewPaxosClient("temp-joiner", addr0)
@@ -59,7 +59,6 @@ func TestIntegration_Locks(t *testing.T) {
 		agents[i].store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: "agent-0"}, kvResp.Value)
 		agents[i].store.CommitKV("/_internal/peers", kvResp.Value, "membership", kvResp.Version)
 		agents[i].cell.ApplyMembershipChange(kvResp.Value)
-		agents[i].cell.UpdateEphemeralPeer("agent-0", addr0, agents[0].httpURL)
 		client.Close()
 
 		agents[0].cell.ProposeMembership(context.Background(), agents[i].id, infoI)

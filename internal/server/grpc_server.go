@@ -49,11 +49,11 @@ func (s *PaxosServer) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*
 // JoinCluster processes a request from a new node attempting to join the cluster.
 func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error) {
 	glog.Infof("gRPC: Received JoinCluster from %s at %s", req.AgentId, req.HostPort)
-	// Update ephemeral map
-	s.cell.UpdateEphemeralPeer(req.AgentId, req.HostPort, req.HttpUrl)
 
 	info := state.PeerInfo{
 		ShortName: req.ShortName,
+		GRPCAddr:  req.HostPort,
+		HTTPURL:   req.HttpUrl,
 	}
 	err := s.cell.ProposeMembership(ctx, req.AgentId, info)
 	if err != nil {
@@ -73,8 +73,16 @@ func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterR
 
 // Sync returns the highest known version numbers for all keys in the local store.
 func (s *PaxosServer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error) {
-	// Update ephemeral map
-	s.cell.UpdateEphemeralPeer(req.AgentId, req.HostPort, req.HttpUrl)
+	members, err := s.store.GetMembers()
+	if err == nil {
+		if info, ok := members[req.AgentId]; ok {
+			if info.GRPCAddr != req.HostPort || info.HTTPURL != req.HttpUrl {
+				info.GRPCAddr = req.HostPort
+				info.HTTPURL = req.HttpUrl
+				s.cell.ProposeMembership(context.Background(), req.AgentId, info)
+			}
+		}
+	}
 
 	keys, err := s.cell.GetSyncState()
 	if err != nil {
@@ -102,17 +110,28 @@ func (s *PaxosServer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryReq
 
 // Ping responds to a liveness check and exchanges endpoint information.
 func (s *PaxosServer) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error) {
-	// Update ephemeral map
-	s.cell.UpdateEphemeralPeer(req.AgentId, req.HostPort, req.HttpUrl)
+	members, err := s.store.GetMembers()
+	if err == nil {
+		if info, ok := members[req.AgentId]; ok {
+			if info.GRPCAddr != req.HostPort || info.HTTPURL != req.HttpUrl {
+				info.GRPCAddr = req.HostPort
+				info.HTTPURL = req.HttpUrl
+				s.cell.ProposeMembership(context.Background(), req.AgentId, info)
+			}
+		}
+	}
 
-	// Get our own ephemeral info (set in main.go)
-	eph, _ := s.cell.GetEphemeralPeer(s.agentID)
+	var grpcAddr, httpUrl string
+	if selfInfo, ok := members[s.agentID]; ok {
+		grpcAddr = selfInfo.GRPCAddr
+		httpUrl = selfInfo.HTTPURL
+	}
 
 	return &paxosv1.PingResponse{
 		AgentId:  s.agentID,
 		Nonce:    req.Nonce,
-		HostPort: eph.GRPCAddr,
-		HttpUrl:  eph.HTTPURL,
+		HostPort: grpcAddr,
+		HttpUrl:  httpUrl,
 	}, nil
 }
 
@@ -122,11 +141,13 @@ func (s *PaxosServer) GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeer
 		Endpoints: make(map[string]*paxosv1.EndpointInfo),
 	}
 
-	ephs := s.cell.GetEphemeralPeers()
-	for id, info := range ephs {
-		resp.Endpoints[id] = &paxosv1.EndpointInfo{
-			HostPort: info.GRPCAddr,
-			HttpUrl:  info.HTTPURL,
+	members, err := s.store.GetMembers()
+	if err == nil {
+		for id, info := range members {
+			resp.Endpoints[id] = &paxosv1.EndpointInfo{
+				HostPort: info.GRPCAddr,
+				HttpUrl:  info.HTTPURL,
+			}
 		}
 	}
 	return resp, nil
