@@ -13,9 +13,10 @@ import (
 
 // Acceptor handles the receiving end of the Paxos protocol, promising and accepting proposals.
 type Acceptor struct {
-	agentID string
-	store   *state.Store
-	mu      sync.Mutex
+	agentID   string
+	store     *state.Store
+	validator func(ctx context.Context, req *paxosv1.AcceptRequest) error
+	mu        sync.Mutex
 }
 
 // NewAcceptor creates and returns a new Acceptor.
@@ -25,6 +26,13 @@ func NewAcceptor(agentID string, store *state.Store) *Acceptor {
 		agentID: agentID,
 		store:   store,
 	}
+}
+
+// SetValidator configures a validation hook for AcceptRequests.
+func (a *Acceptor) SetValidator(v func(ctx context.Context, req *paxosv1.AcceptRequest) error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.validator = v
 }
 
 // Prepare processes a PrepareRequest (Phase 1a) and determines whether to issue a promise (Phase 1b).
@@ -87,6 +95,28 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 	}
 
 	var resp *paxosv1.AcceptedResponse
+	
+	// Execute external validation hook if present
+	if a.validator != nil {
+		if err := a.validator(ctx, req); err != nil {
+			glog.Warningf("Acceptor(%s): Validator rejected Accept for key %s: %v", a.agentID, req.Key, err)
+			resp = &paxosv1.AcceptedResponse{
+				AgentId:           a.agentID,
+				Accepted:          false,
+				HighestPromisedId: promisedID,
+			}
+			
+			// Log the rejection
+			opts := prototext.MarshalOptions{Multiline: true}
+			reqBytes := []byte(opts.Format(req))
+			respBytes := []byte(opts.Format(resp))
+			if logErr := a.store.LogMessage("Accept", req.AgentId, a.agentID, reqBytes, respBytes); logErr != nil {
+				glog.Errorf("Acceptor(%s): Failed to log Accept message: %v", a.agentID, logErr)
+			}
+			return resp, nil
+		}
+	}
+
 	// Accept if proposal ID is >= promised ID
 	if isGreaterEqual(req.ProposalId, promisedID) {
 		glog.Infof("Acceptor(%s): Accepted proposal %v for key %s", a.agentID, req.ProposalId, req.Key)

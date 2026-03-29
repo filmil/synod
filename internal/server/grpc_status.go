@@ -27,9 +27,17 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	eph, ok := s.cell.GetEphemeralPeer(agentID)
-	if !ok || eph.GRPCAddr == "" {
-		data.ErrorMsg = "<div class='alert alert-danger'>gRPC address not found for self</div>"
+	members, err := s.store.GetMembers()
+	if err != nil {
+		data.ErrorMsg = template.HTML("<div class='alert alert-danger'>Failed to retrieve members</div>")
+		w.Header().Set("Content-Type", "text/html")
+		templates.ExecuteTemplate(w, "grpc.html", data)
+		return
+	}
+
+	selfInfo, ok := members[agentID]
+	if !ok || selfInfo.GRPCAddr == "" {
+		data.ErrorMsg = template.HTML("<div class='alert alert-danger'>gRPC address not found for self</div>")
 		w.Header().Set("Content-Type", "text/html")
 		templates.ExecuteTemplate(w, "grpc.html", data)
 		return
@@ -38,7 +46,7 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	conn, err := grpc.NewClient(eph.GRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(selfInfo.GRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-danger'>Failed to connect to local gRPC channelz: %v</div>", err))
 		w.Header().Set("Content-Type", "text/html")

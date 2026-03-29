@@ -41,13 +41,11 @@ func TestCell_ProposeRemoval(t *testing.T) {
 	if err := store.AddMember(agentID, peersMap[agentID]); err != nil {
 		t.Fatalf("failed to add self to membership: %v", err)
 	}
-	if err := store.AddMember(peerID, peerInfo); err != nil {
+	if err := store.AddMember(peerID, state.PeerInfo{ShortName: "Peer 1", GRPCAddr: "localhost:1234"}); err != nil {
 		t.Fatalf("failed to add peer to membership: %v", err)
 	}
 
 	cell := NewCell(agentID, store, acceptor, nil, "localhost:50051", "http://localhost:8080")
-	// Also need the peer to be in ephemeral map so refreshPeers includes it
-	cell.UpdateEphemeralPeer(peerID, "localhost:1234", "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -99,8 +97,8 @@ func TestCell_PingPeers(t *testing.T) {
 
 	peersMap := map[string]state.PeerInfo{
 		agentID: {ShortName: "Self"},
-		peer1ID: {ShortName: "Peer1"},
-		peer2ID: {ShortName: "Peer2"},
+		peer1ID: {ShortName: "Peer1", GRPCAddr: "localhost:1111"},
+		peer2ID: {ShortName: "Peer2", GRPCAddr: "localhost:2222"},
 	}
 	peersData, _ := json.Marshal(peersMap)
 	store.CommitKV(constants.PeersKey, peersData, "membership", 1)
@@ -128,9 +126,6 @@ func TestCell_PingPeers(t *testing.T) {
 	}
 
 	cell := NewCell(agentID, store, acceptor, factory, "localhost:50051", "http://localhost:8080")
-	// Populate ephemeral map
-	cell.UpdateEphemeralPeer(peer1ID, "localhost:1111", "")
-	cell.UpdateEphemeralPeer(peer2ID, "localhost:2222", "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

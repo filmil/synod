@@ -193,11 +193,9 @@ func main() {
 			}
 
 			if joinedAgentID != "" {
-				if err := store.AddMember(joinedAgentID, state.PeerInfo{ShortName: "Unknown"}); err != nil {
+				if err := store.AddMember(joinedAgentID, state.PeerInfo{ShortName: "Unknown", GRPCAddr: *peerAddr}); err != nil {
 					glog.Errorf("Failed to add join peer to membership: %v", err)
 				}
-				// Also add the join peer to ephemeral map so we can talk to it
-				cell.UpdateEphemeralPeer(joinedAgentID, *peerAddr, "")
 
 				// Download the consensus value of the list of peers
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

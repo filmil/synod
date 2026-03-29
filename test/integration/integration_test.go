@@ -44,6 +44,8 @@ func TestIntegration_5Agents(t *testing.T) {
 
 	info0 := state.PeerInfo{
 		ShortName: "agent-0-name",
+		GRPCAddr:  addr0,
+		HTTPURL:   agents[0].httpURL,
 	}
 
 	// Ensure self is in membership for agent-0
@@ -71,6 +73,8 @@ func TestIntegration_5Agents(t *testing.T) {
 
 		infoI := state.PeerInfo{
 			ShortName: fmt.Sprintf("agent-%d-name", i),
+			GRPCAddr:  agents[i].grpcAddr,
+			HTTPURL:   agents[i].httpURL,
 		}
 
 		// Ensure self is in membership
@@ -98,11 +102,10 @@ func TestIntegration_5Agents(t *testing.T) {
 			t.Fatalf("JoinCluster rejected for agent-%d: %s", i, resp.Message)
 		}
 		// Add agent-0 to local membership so we can sync
+		info0 := state.PeerInfo{ShortName: "agent-0-name", GRPCAddr: addr0, HTTPURL: agents[0].httpURL}
 		if err := agents[i].store.AddMember(resp.AgentId, info0); err != nil {
 			t.Fatalf("Failed to add join peer to membership for agent-%d: %v", i, err)
 		}
-		// Also add agent-0 to ephemeral map so we can talk to it
-		agents[i].cell.UpdateEphemeralPeer(resp.AgentId, addr0, agents[0].httpURL)
 
 		// Download consensus value of peers
 		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
