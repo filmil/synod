@@ -215,6 +215,13 @@
   - In case of failure, exponentially back off, and retry.
 - Modify the gRPC API to provide this API.
 
+#### Update S.3: Discard unknown peers
+
+- Ensure that gRPC channels which do not correspond to any known peers (or
+  whose IDs are explicitly removed from the membership state) are dropped
+  properly.
+- Add this task to the "Safety" section of the specification.
+
 ### User API endpoints
 
 #### Feature A.1: Introduce user API
