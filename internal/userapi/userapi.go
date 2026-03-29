@@ -83,7 +83,7 @@ func (a *UserAPI) Read(ctx context.Context, key string, quorum paxosv1.ReadQuoru
 }
 
 // CompareAndWrite implements CAS using paxos proposal and backoff.
-func (a *UserAPI) CompareAndWrite(ctx context.Context, key string, oldValue, newValue []byte) (*paxosv1.CompareAndWriteResponse, error) {
+func (a *UserAPI) CompareAndWrite(ctx context.Context, key string, oldValue, newValue []byte, qt paxos.QuorumType) (*paxosv1.CompareAndWriteResponse, error) {
 	bo := backoff.New()
 
 	var success bool
@@ -92,6 +92,10 @@ func (a *UserAPI) CompareAndWrite(ctx context.Context, key string, oldValue, new
 	// Sync once at the start
 	a.cell.SyncWithPeers(ctx)
 	err := bo.Retry(ctx, "CompareAndWrite", func() error {
+		// Verify locks before attempting write
+		if err := a.CheckLocks(ctx, key); err != nil {
+			return backoff.Permanent(fmt.Errorf("lock check failed: %w", err))
+		}
 
 		// Read current value
 		currentVal, _, v, _, err := a.cell.GetStore().GetKVEntry(key)
@@ -100,11 +104,11 @@ func (a *UserAPI) CompareAndWrite(ctx context.Context, key string, oldValue, new
 		}
 
 		if !bytes.Equal(currentVal, oldValue) {
-			return fmt.Errorf("CompareAndWrite failed: old value mismatch")
+			return backoff.Permanent(fmt.Errorf("CompareAndWrite failed: old value mismatch"))
 		}
 
 		// Issue proposal
-		err = a.cell.Propose(ctx, key, newValue)
+		err = a.cell.Propose(ctx, key, newValue, qt)
 		if err != nil {
 			return err
 		}

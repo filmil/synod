@@ -188,7 +188,7 @@ func TestIntegration_5Agents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	err = agents[0].cell.Propose(ctx, "/app/state", []byte("exit"))
+	err = agents[0].cell.Propose(ctx, "/app/state", []byte("exit"), paxos.QuorumMajority)
 	if err != nil {
 		t.Fatalf("Consensus on '/app/state' failed: %v", err)
 	}

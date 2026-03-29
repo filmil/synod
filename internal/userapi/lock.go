@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/filmil/synod/internal/constants"
+	"github.com/filmil/synod/internal/paxos"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 )
@@ -112,7 +113,7 @@ func (a *UserAPI) acquireSingleLock(ctx context.Context, lockPath, agentID strin
 	// Lock is either empty, invalid, expired, or held by us.
 	// Attempt CompareAndWrite to acquire/renew.
 	// Note: We bypass CheckLocks here because we are writing to the lock key itself.
-	resp, err := a.CompareAndWrite(ctx, lockPath, val, newVal)
+	resp, err := a.CompareAndWrite(ctx, lockPath, val, newVal, paxos.QuorumMajority)
 	if err != nil {
 		return false, err
 	}
@@ -137,7 +138,17 @@ func (a *UserAPI) ReleaseLock(ctx context.Context, req *paxosv1.ReleaseLockReque
 			if err := json.Unmarshal(val, &currentLock); err == nil {
 				// Only release if we own it
 				if currentLock.AgentID == agentID {
-					a.CompareAndWrite(ctx, lockPath, val, []byte{})
+					// Restrict retryability to the lock's expiration time
+					releaseCtx, cancel := context.WithDeadline(ctx, time.Unix(0, currentLock.ExpiresAt))
+					resp, err := a.CompareAndWrite(releaseCtx, lockPath, val, []byte{}, paxos.QuorumAll)
+					cancel()
+					
+					if err != nil {
+						return &paxosv1.ReleaseLockResponse{Success: false, Message: fmt.Sprintf("failed to release lock at %s: %v", lockPath, err)}, nil
+					}
+					if !resp.Success {
+						return &paxosv1.ReleaseLockResponse{Success: false, Message: fmt.Sprintf("failed to release lock at %s: %s", lockPath, resp.Message)}, nil
+					}
 				}
 			}
 		}
@@ -179,7 +190,7 @@ func (a *UserAPI) RenewLock(ctx context.Context, req *paxosv1.RenewLockRequest) 
 				}
 				newVal, _ := json.Marshal(newLock)
 
-				resp, err := a.CompareAndWrite(ctx, lockPath, val, newVal)
+				resp, err := a.CompareAndWrite(ctx, lockPath, val, newVal, paxos.QuorumMajority)
 				if err != nil || !resp.Success {
 					return &paxosv1.RenewLockResponse{Success: false, Message: fmt.Sprintf("failed to renew lock at %s", lockPath)}, nil
 				}

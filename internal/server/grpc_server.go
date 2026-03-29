@@ -127,7 +127,11 @@ func (s *PaxosServer) Read(ctx context.Context, req *paxosv1.ReadRequest) (*paxo
 }
 
 func (s *PaxosServer) CompareAndWrite(ctx context.Context, req *paxosv1.CompareAndWriteRequest) (*paxosv1.CompareAndWriteResponse, error) {
-	return s.userAPI.CompareAndWrite(ctx, req.Key, req.OldValue, req.NewValue)
+	qt := paxos.QuorumMajority
+	if req.Quorum == paxosv1.WriteQuorum_WRITE_QUORUM_ALL {
+		qt = paxos.QuorumAll
+	}
+	return s.userAPI.CompareAndWrite(ctx, req.Key, req.OldValue, req.NewValue, qt)
 }
 
 

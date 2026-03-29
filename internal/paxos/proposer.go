@@ -27,7 +27,14 @@ func NewProposer(agentID string, peers []PeerClient, acceptor *Acceptor) *Propos
 	}
 }
 
-func (p *Proposer) Propose(ctx context.Context, key string, value []byte) ([]byte, error) {
+type QuorumType int
+
+const (
+	QuorumMajority QuorumType = iota
+	QuorumAll
+)
+
+func (p *Proposer) Propose(ctx context.Context, key string, value []byte, qt QuorumType) ([]byte, error) {
 	p.mu.Lock()
 	proposalID := &paxosv1.ProposalID{
 		Number:  p.nextNum,
@@ -37,14 +44,16 @@ func (p *Proposer) Propose(ctx context.Context, key string, value []byte) ([]byt
 	p.mu.Unlock()
 
 	nonce := uuid.New().String()
-	glog.Infof("Proposer(%s): Starting proposal for key %s, proposal %v, nonce %s",
-		p.agentID, key, proposalID, nonce)
+	glog.Infof("Proposer(%s): Starting proposal for key %s, proposal %v, nonce %s, quorum %v",
+		p.agentID, key, proposalID, nonce, qt)
+
+	required := p.required(qt)
 
 	// Phase 1: Prepare
 	promises := p.sendPrepare(ctx, key, proposalID, nonce)
-	if len(promises) < p.quorum() {
-		glog.Warningf("Proposer(%s): Phase 1 failed for key %s: no quorum", p.agentID, key)
-		return nil, fmt.Errorf("failed to reach quorum in Phase 1 (Prepare): got %d, need %d", len(promises), p.quorum())
+	if len(promises) < required {
+		glog.Warningf("Proposer(%s): Phase 1 failed for key %s: no quorum (got %d, need %d)", p.agentID, key, len(promises), required)
+		return nil, fmt.Errorf("failed to reach quorum in Phase 1 (Prepare): got %d, need %d", len(promises), required)
 	}
 
 	// Pick the value from the highest accepted proposal
@@ -60,18 +69,25 @@ func (p *Proposer) Propose(ctx context.Context, key string, value []byte) ([]byt
 
 	// Phase 2: Accept
 	acceptedCount := p.sendAccept(ctx, key, proposalID, value, nonce)
-	if acceptedCount < p.quorum() {
-		glog.Warningf("Proposer(%s): Phase 2 failed for key %s: no quorum", p.agentID, key)
-		return nil, fmt.Errorf("failed to reach quorum in Phase 2 (Accept): got %d, need %d", acceptedCount, p.quorum())
+	if acceptedCount < required {
+		glog.Warningf("Proposer(%s): Phase 2 failed for key %s: no quorum (got %d, need %d)", p.agentID, key, acceptedCount, required)
+		return nil, fmt.Errorf("failed to reach quorum in Phase 2 (Accept): got %d, need %d", acceptedCount, required)
 	}
 
 	glog.Infof("Proposer(%s): Consensus reached for key %s", p.agentID, key)
 	return value, nil
 }
 
-func (p *Proposer) quorum() int {
+func (p *Proposer) required(qt QuorumType) int {
 	total := len(p.peers) + 1
+	if qt == QuorumAll {
+		return total
+	}
 	return total/2 + 1
+}
+
+func (p *Proposer) quorum() int {
+	return p.required(QuorumMajority)
 }
 
 func (p *Proposer) sendPrepare(ctx context.Context, key string, id *paxosv1.ProposalID, nonce string) []*paxosv1.PromiseResponse {

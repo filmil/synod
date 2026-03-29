@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/filmil/synod/internal/backoff"
 	"github.com/filmil/synod/internal/server"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
@@ -70,6 +71,7 @@ func TestIntegration_Locks(t *testing.T) {
 
 	// Test 1: Acquire lock on /foo/_lockable/bar
 	// This should acquire lock on /foo/_lockable
+	glog.V(1).Infof("Test 1")
 	ctx := context.Background()
 
 	resp, err := agents[0].srv.AcquireLock(ctx, &paxosv1.AcquireLockRequest{
@@ -107,15 +109,41 @@ func TestIntegration_Locks(t *testing.T) {
 	}
 
 	// Test 4: Release lock
+	glog.V(1).Infof("Test 4: release lock")
 	relResp, err := agents[0].srv.ReleaseLock(ctx, &paxosv1.ReleaseLockRequest{
 		KeyPath: "/foo/_lockable/bar",
 	})
 	if err != nil || !relResp.Success {
 		t.Fatalf("ReleaseLock failed: %v", err)
 	}
+	glog.V(1).Infof("Test 4: lock hopefully released")
 
 	// Test 5: Write with another agent (should now succeed because lock is released)
 	time.Sleep(2 * time.Second) // wait for sync
+
+	glog.V(1).Infof("Test 4: attempt to reacquire the lock via a different agent.")
+	// Agent 1 must acquire the lock first because /foo/_lockable/bar is a lockable path.
+	bo := backoff.New()
+	bo.MaxElapsedTime = 30 * time.Second
+	
+	err = bo.Retry(ctx, "Test5_AcquireLock", func() error {
+		resp, err = agents[1].srv.AcquireLock(ctx, &paxosv1.AcquireLockRequest{
+			KeyPath:    "/foo/_lockable/bar",
+			DurationMs: 10000,
+		})
+		if err != nil {
+			return err
+		}
+		if !resp.Success {
+			return fmt.Errorf("lock acquire rejected: %s", resp.GetMessage())
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("Agent 1 failed to acquire lock after retries: %v", err)
+	}
+
 	writeResp, err = agents[1].srv.CompareAndWrite(ctx, &paxosv1.CompareAndWriteRequest{
 		Key:      "/foo/_lockable/bar",
 		OldValue: []byte("legit"),

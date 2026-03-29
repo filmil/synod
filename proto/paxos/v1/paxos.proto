@@ -63,10 +63,17 @@ message ReadResponse {
   uint64 version = 4;
 }
 
+enum WriteQuorum {
+  WRITE_QUORUM_UNSPECIFIED = 0;
+  WRITE_QUORUM_MAJORITY = 1; // Consensus by majority
+  WRITE_QUORUM_ALL = 2;      // Consensus by all agents
+}
+
 message CompareAndWriteRequest {
   string key = 1;
   bytes old_value = 2; // Expected old value
   bytes new_value = 3; // Value to write
+  WriteQuorum quorum = 4;
 }
 
 message CompareAndWriteResponse {

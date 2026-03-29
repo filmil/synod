@@ -111,7 +111,7 @@ func TestProposer_Success(t *testing.T) {
 	p := NewProposer(agentID, peers, acceptor)
 	ctx := context.Background()
 
-	_, err = p.Propose(ctx, "/test/key", []byte("consensus-value"))
+	_, err = p.Propose(ctx, "/test/key", []byte("consensus-value"), QuorumMajority)
 	if err != nil {
 		t.Fatalf("Propose failed: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestProposer_NoQuorum(t *testing.T) {
 	p := NewProposer(agentID, peers, acceptor)
 	ctx := context.Background()
 
-	_, err = p.Propose(ctx, "/test/key", []byte("val"))
+	_, err = p.Propose(ctx, "/test/key", []byte("val"), QuorumMajority)
 	if err == nil {
 		t.Fatalf("Expected Propose to fail due to lack of quorum")
 	}
