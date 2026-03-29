@@ -126,6 +126,7 @@ message PromiseResponse {
   bool promised = 2;
   ProposalID highest_accepted_id = 3;
   bytes highest_accepted_value = 4;
+  ProposalID highest_promised_id = 5;
 }
 
 message AcceptRequest {
@@ -139,6 +140,7 @@ message AcceptRequest {
 message AcceptedResponse {
   string agent_id = 1;
   bool accepted = 2;
+  ProposalID highest_promised_id = 3;
 }
 
 message JoinClusterRequest {

@@ -47,13 +47,15 @@ func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*p
 			Promised:             true,
 			HighestAcceptedId:    acceptedID,
 			HighestAcceptedValue: acceptedValue,
+			HighestPromisedId:    req.ProposalId,
 		}
 	} else {
 		glog.Warningf("Acceptor(%s): Rejected Prepare for key %s: proposal %v <= promised %v",
 			a.agentID, req.Key, req.ProposalId, promisedID)
 		resp = &paxosv1.PromiseResponse{
-			AgentId:  a.agentID,
-			Promised: false,
+			AgentId:           a.agentID,
+			Promised:          false,
+			HighestPromisedId: promisedID,
 		}
 	}
 
@@ -87,15 +89,17 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 			return nil, fmt.Errorf("failed to set accepted value: %w", err)
 		}
 		resp = &paxosv1.AcceptedResponse{
-			AgentId:  a.agentID,
-			Accepted: true,
+			AgentId:           a.agentID,
+			Accepted:          true,
+			HighestPromisedId: req.ProposalId,
 		}
 	} else {
 		glog.Warningf("Acceptor(%s): Rejected Accept for key %s: proposal %v < promised %v",
 			a.agentID, req.Key, req.ProposalId, promisedID)
 		resp = &paxosv1.AcceptedResponse{
-			AgentId:  a.agentID,
-			Accepted: false,
+			AgentId:           a.agentID,
+			Accepted:          false,
+			HighestPromisedId: promisedID,
 		}
 	}
 
