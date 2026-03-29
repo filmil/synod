@@ -186,6 +186,14 @@
   the page.
 - Present in a tabular form.
 
+#### Update P.6: gRPC introspection
+
+- Make a new HTML page which uses gRPC introspection to show a gRPC status on
+  that page.
+- The page should be styled as other pages.
+- Append a new section in "Presentation" section of the specification to
+  describe this task in detail.
+
 ### Safety
 
 #### Update S.1: exponential backoff
