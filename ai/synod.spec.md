@@ -227,6 +227,11 @@
   properly.
 - Add this task to the "Safety" section of the specification.
 
+#### Update S.4: Evict dead peers lacking endpoints
+
+- Ensure that for the process which tries to figure out the endpoints for unknown peer endpoints: every 5th time a peer address is not found, propose removing that peer from the quorum.
+- Update the specification to reflect this.
+
 ### User API endpoints
 
 #### Feature A.1: Introduce user API
