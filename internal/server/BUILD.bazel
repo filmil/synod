@@ -13,6 +13,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/backoff",
+        "//internal/constants",
         "//internal/paxos",
         "//internal/state",
         "//internal/userapi",

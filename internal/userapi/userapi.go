@@ -89,7 +89,10 @@ func (a *UserAPI) CompareAndWrite(ctx context.Context, key string, oldValue, new
 	var success bool
 	var version uint64
 
+	// Sync once at the start
+	a.cell.SyncWithPeers(ctx)
 	err := bo.Retry(ctx, "CompareAndWrite", func() error {
+
 		// Read current value
 		currentVal, _, v, _, err := a.cell.GetStore().GetKVEntry(key)
 		if err != nil {

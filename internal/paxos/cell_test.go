@@ -1,6 +1,7 @@
 package paxos
 
 import (
+	"github.com/filmil/synod/internal/constants"
 	"context"
 	"encoding/json"
 	"os"
@@ -34,7 +35,7 @@ func TestCell_ProposeRemoval(t *testing.T) {
 		peerID:  peerInfo,
 	}
 	peersData, _ := json.Marshal(peersMap)
-	if err := store.CommitKV("/_internal/peers", peersData, "membership", 1); err != nil {
+	if err := store.CommitKV(constants.PeersKey, peersData, "membership", 1); err != nil {
 		t.Fatalf("failed to set initial peers: %v", err)
 	}
 	if err := store.AddMember(agentID, peersMap[agentID]); err != nil {
@@ -65,7 +66,7 @@ func TestCell_ProposeRemoval(t *testing.T) {
 	}
 
 	// Verify /_internal/peers KV is updated
-	val, _, _, _, err := store.GetKVEntry("/_internal/peers")
+	val, _, _, _, err := store.GetKVEntry(constants.PeersKey)
 	if err != nil {
 		t.Fatalf("Failed to get KV entry: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestCell_PingPeers(t *testing.T) {
 		peer2ID: {ShortName: "Peer2"},
 	}
 	peersData, _ := json.Marshal(peersMap)
-	store.CommitKV("/_internal/peers", peersData, "membership", 1)
+	store.CommitKV(constants.PeersKey, peersData, "membership", 1)
 	store.AddMember(agentID, peersMap[agentID])
 	store.AddMember(peer1ID, peersMap[peer1ID])
 	store.AddMember(peer2ID, peersMap[peer2ID])

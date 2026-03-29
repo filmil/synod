@@ -33,6 +33,15 @@ service UserService {
 
   // Propose a write of a value for a specific key using Compare-and-Swap logic.
   rpc CompareAndWrite(CompareAndWriteRequest) returns (CompareAndWriteResponse) {}
+
+  // Acquire a lock on a key path.
+  rpc AcquireLock(AcquireLockRequest) returns (AcquireLockResponse) {}
+
+  // Release a lock on a key path.
+  rpc ReleaseLock(ReleaseLockRequest) returns (ReleaseLockResponse) {}
+
+  // Renew a lock on a key path.
+  rpc RenewLock(RenewLockRequest) returns (RenewLockResponse) {}
 }
 
 enum ReadQuorum {
@@ -158,4 +167,34 @@ message GetKVEntryResponse {
   bytes value = 2;
   string type = 3;
   uint64 version = 4;
+}
+
+
+message AcquireLockRequest {
+  string key_path = 1;
+  int64 duration_ms = 2;
+}
+
+message AcquireLockResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ReleaseLockRequest {
+  string key_path = 1;
+}
+
+message ReleaseLockResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message RenewLockRequest {
+  string key_path = 1;
+  int64 duration_ms = 2;
+}
+
+message RenewLockResponse {
+  bool success = 1;
+  string message = 2;
 }

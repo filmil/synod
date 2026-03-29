@@ -244,20 +244,20 @@ treat writes.
 
 - If the user wants to write to a key which has `_lockable` as a path
   component, such as `/foo/_lockable/bar`, it must first successfully write to
-  a path `/foo/_lockable/_lock`.
-  - The contents of the entry with the name `_lock` are at minimum:
+  the path `/foo/_lockable`.
+  - The contents of the entry with the name `_lockable` are at minimum:
     - The Agent ID of the agent succesfully acquired the lock.
     - The timestamp at which the lock expires.
 - Synod agents MUST refuse a write to `/foo/_lockable/bar` if the lock at
-  `/foo/_lockable/_lock` is held by another agent, or if the lock has expired.
+  `/foo/_lockable` is held by another agent, or if the lock has expired.
   - If the lock has expired, the agent may attempt to acquire it.
   - If the lock is held by another agent, the agent must refuse the write.
 - The lock is acquired by a successful `CompareAndWrite` operation on the
-  `_lock` key.
-- The lock is released by a `CompareAndWrite` operation on the `_lock` key
+  `_lockable` key.
+- The lock is released by a `CompareAndWrite` operation on the `_lockable` key
   which sets its value to empty.
-- The lock can be renewed by a `CompareAndWrite` operation on the `_lock` key
-  which updates the timestamp.
+- The lock can be renewed by a `CompareAndWrite` operation on the `_lockable`
+  key which updates the timestamp.
 - Add a new gRPC API endpoint for `AcquireLock`, `ReleaseLock`, `RenewLock`.
   - `AcquireLock` takes a key path and a duration for the lock.
   - `ReleaseLock` takes a key path.

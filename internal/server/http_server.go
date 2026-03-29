@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -12,8 +13,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/bazelbuild/rules_go/go/runfiles"
+	"github.com/filmil/synod/internal/constants"
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/state"
 	"github.com/filmil/synod/internal/userapi"
@@ -21,17 +25,57 @@ import (
 	"github.com/golang/glog"
 )
 
+type OngoingRequest struct {
+	ID        string
+	Type      string
+	Key       string
+	StartTime time.Time
+	Result    string
+	Finished  bool
+	Success   bool
+}
+
 type HTTPServer struct {
 	store *state.Store
 	cell  *paxos.Cell
 	addr  string
+
+	mu              sync.Mutex
+	ongoingRequests []OngoingRequest
 }
 
 func NewHTTPServer(addr string, store *state.Store, cell *paxos.Cell) *HTTPServer {
 	return &HTTPServer{
-		addr:  addr,
-		store: store,
-		cell:  cell,
+		addr:            addr,
+		store:           store,
+		cell:            cell,
+		ongoingRequests: []OngoingRequest{},
+	}
+}
+
+func (s *HTTPServer) addOngoingRequest(reqType, key string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := fmt.Sprintf("req-%d", len(s.ongoingRequests))
+	s.ongoingRequests = append([]OngoingRequest{{
+		ID:        id,
+		Type:      reqType,
+		Key:       key,
+		StartTime: time.Now(),
+	}}, s.ongoingRequests...) // Prepend
+	return id
+}
+
+func (s *HTTPServer) completeOngoingRequest(id string, success bool, result string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, r := range s.ongoingRequests {
+		if r.ID == id {
+			s.ongoingRequests[i].Finished = true
+			s.ongoingRequests[i].Success = success
+			s.ongoingRequests[i].Result = result
+			return
+		}
 	}
 }
 
@@ -46,12 +90,14 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	mux.HandleFunc("/userapi", s.handleUserAPI)
 	mux.HandleFunc("/api/user/read", s.handleUserAPIRead)
 	mux.HandleFunc("/api/user/write", s.handleUserAPIWrite)
+	mux.HandleFunc("/api/user/lock/acquire", s.handleUserAPILockAcquire)
+	mux.HandleFunc("/api/user/lock/release", s.handleUserAPILockRelease)
+	mux.HandleFunc("/api/user/lock/renew", s.handleUserAPILockRenew)
 
 	// Serve locally saved bootstrap via runfiles
 	mux.HandleFunc("/static/bootstrap.min.css", func(w http.ResponseWriter, r *http.Request) {
 		path, err := runfiles.Rlocation("_main/third_party/bootstrap/bootstrap.min.css")
 		if err != nil {
-			// fallback for bzlmod if _main doesn't work
 			path, err = runfiles.Rlocation("synod/third_party/bootstrap/bootstrap.min.css")
 		}
 		if err != nil {
@@ -175,7 +221,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	val, _, _, _, err := s.store.GetKVEntry("/_internal/peers")
+	val, _, _, _, err := s.store.GetKVEntry(constants.PeersKey)
 	if err != nil {
 		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
 		return
@@ -286,7 +332,7 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	val, _, _, _, err := s.store.GetKVEntry("/_internal/peers")
+	val, _, _, _, err := s.store.GetKVEntry(constants.PeersKey)
 	if err != nil {
 		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
 		return
@@ -402,7 +448,7 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	val, _, _, _, err := s.store.GetKVEntry("/_internal/peers")
+	val, _, _, _, err := s.store.GetKVEntry(constants.PeersKey)
 	if err != nil {
 		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
 		return
@@ -414,6 +460,8 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 			glog.Errorf("Failed to unmarshal peers map: %v", err)
 		}
 	}
+
+	ephemeral := s.cell.GetEphemeralPeers()
 
 	s.renderHeader(w, "Peers", shortName, "peers")
 	fmt.Fprintf(w, `
@@ -439,8 +487,6 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Strings(ids)
-
-	ephemeral := s.cell.GetEphemeralPeers()
 
 	for _, id := range ids {
 		info := members[id]
@@ -543,7 +589,12 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	glog.Infof("HTTP: Received proposal for key %s with value: %s", key, val)
-	if err := s.cell.Propose(r.Context(), key, []byte(val)); err != nil {
+
+	// Wrap in timeout
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	if err := s.cell.Propose(ctx, key, []byte(val)); err != nil {
 		glog.Errorf("HTTP: Proposal failed: %v", err)
 		http.Error(w, fmt.Sprintf("Paxos proposal failed: %v", err), http.StatusInternalServerError)
 		return
@@ -559,6 +610,328 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
         <a href="/" class="btn btn-primary">Back to Status</a>
       </div>`, key, val)
 	s.renderFooter(w)
+}
+
+func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
+	_, shortName, err := s.store.GetAgentID()
+	if err != nil {
+		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+
+	s.mu.Lock()
+	ongoing := make([]OngoingRequest, len(s.ongoingRequests))
+	copy(ongoing, s.ongoingRequests)
+	s.mu.Unlock()
+
+	s.renderHeader(w, "User API", shortName, "userapi")
+
+	ongoingHTML := ""
+	if len(ongoing) > 0 {
+		ongoingHTML = `
+		<div class="card shadow-sm mb-4">
+			<div class="card-header bg-dark text-white">Recently Executed / Ongoing Requests</div>
+			<div class="card-body">
+				<div class="table-responsive">
+					<table class="table table-sm table-hover">
+						<thead><tr><th>Time</th><th>Type</th><th>Key</th><th>Status</th><th>Result</th></tr></thead>
+						<tbody>`
+		for _, r := range ongoing {
+			status := "<span class=\"badge bg-secondary\">Ongoing...</span>"
+			if r.Finished {
+				if r.Success {
+					status = "<span class=\"badge bg-success\">Success</span>"
+				} else {
+					status = "<span class=\"badge bg-danger\">Failed</span>"
+				}
+			}
+			resultText := r.Result
+			if len(resultText) > 100 {
+				resultText = resultText[:97] + "..."
+			}
+			ongoingHTML += fmt.Sprintf("<tr><td>%s</td><td>%s</td><td><code>%s</code></td><td>%s</td><td><small>%s</small></td></tr>",
+				r.StartTime.Format("15:04:05"), r.Type, html.EscapeString(r.Key), status, html.EscapeString(resultText))
+		}
+		ongoingHTML += "</tbody></table></div></div></div>"
+	}
+
+	// Check for result flash message
+	statusMsg := ""
+	if r.URL.Query().Get("success") == "true" {
+		statusMsg = `<div class="alert alert-success mb-4" role="alert">Operation completed successfully.</div>`
+	} else if errMsg := r.URL.Query().Get("error"); errMsg != "" {
+		statusMsg = fmt.Sprintf(`<div class="alert alert-danger mb-4" role="alert">Operation failed: %s</div>`, html.EscapeString(errMsg))
+	} else if resultMsg := r.URL.Query().Get("result"); resultMsg != "" {
+		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert">Read Result: <code>%s</code></div>`, html.EscapeString(resultMsg))
+	}
+
+	fmt.Fprintf(w, `
+	  %s
+      <div class="row">
+        <div class="col-md-4">
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-primary text-white">Read Key</div>
+            <div class="card-body">
+              <form action="/api/user/read" method="post">
+                <div class="mb-3">
+                  <label class="form-label">Key path</label>
+                  <input type="text" name="key" class="form-control" placeholder="/foo/bar" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Quorum Requirement</label>
+                  <select name="quorum" class="form-select">
+                    <option value="LOCAL">Local (Current Peer Only)</option>
+                    <option value="MAJORITY" selected>Majority</option>
+                    <option value="ALL">All Peers</option>
+                  </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Execute Read</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        
+        <div class="col-md-4">
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-success text-white">Compare And Write</div>
+            <div class="card-body">
+              <form action="/api/user/write" method="post">
+                <div class="mb-3">
+                  <label class="form-label">Key path</label>
+                  <input type="text" name="key" class="form-control" placeholder="/foo/bar" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Expected Old Value</label>
+                  <input type="text" name="old_value" class="form-control" placeholder="old value">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">New Value</label>
+                  <input type="text" name="new_value" class="form-control" placeholder="new value" required>
+                </div>
+                <button type="submit" class="btn btn-success">Execute CompareAndWrite</button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-warning text-dark">Lock Management</div>
+            <div class="card-body">
+              <h6 class="card-title">Acquire Lock</h6>
+              <form action="/api/user/lock/acquire" method="post" class="mb-3">
+                <div class="mb-2">
+                  <input type="text" name="key_path" class="form-control form-control-sm" placeholder="Key Path (/a/_lockable/b)" required>
+                </div>
+                <div class="mb-2">
+                  <input type="number" name="duration" class="form-control form-control-sm" placeholder="Duration (ms)" required>
+                </div>
+                <button type="submit" class="btn btn-sm btn-warning w-100">Acquire</button>
+              </form>
+              
+              <hr>
+              <h6 class="card-title">Renew Lock</h6>
+              <form action="/api/user/lock/renew" method="post" class="mb-3">
+                <div class="mb-2">
+                  <input type="text" name="key_path" class="form-control form-control-sm" placeholder="Key Path (/a/_lockable/b)" required>
+                </div>
+                <div class="mb-2">
+                  <input type="number" name="duration" class="form-control form-control-sm" placeholder="Duration (ms)" required>
+                </div>
+                <button type="submit" class="btn btn-sm btn-info w-100">Renew</button>
+              </form>
+              
+              <hr>
+              <h6 class="card-title">Release Lock</h6>
+              <form action="/api/user/lock/release" method="post">
+                <div class="mb-2">
+                  <input type="text" name="key_path" class="form-control form-control-sm" placeholder="Key Path (/a/_lockable/b)" required>
+                </div>
+                <button type="submit" class="btn btn-sm btn-danger w-100">Release</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+	  %s
+	`, statusMsg, ongoingHTML)
+
+	s.renderFooter(w)
+}
+
+func (s *HTTPServer) handleUserAPIRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
+		return
+	}
+
+	key := r.FormValue("key")
+	qStr := r.FormValue("quorum")
+
+	reqID := s.addOngoingRequest("Read ("+qStr+")", key)
+
+	quorum := paxosv1.ReadQuorum_READ_QUORUM_UNSPECIFIED
+	switch qStr {
+	case "LOCAL":
+		quorum = paxosv1.ReadQuorum_READ_QUORUM_LOCAL
+	case "MAJORITY":
+		quorum = paxosv1.ReadQuorum_READ_QUORUM_MAJORITY
+	case "ALL":
+		quorum = paxosv1.ReadQuorum_READ_QUORUM_ALL
+	}
+
+	// 2 minute timeout
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	userAPI := userapi.New(s.cell)
+	resp, err := userAPI.Read(ctx, key, quorum)
+
+	if err != nil {
+		s.completeOngoingRequest(reqID, false, err.Error())
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+
+	if resp == nil || resp.Value == nil {
+		s.completeOngoingRequest(reqID, false, "key not found")
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape("key not found"), http.StatusSeeOther)
+		return
+	}
+
+	resStr := string(resp.Value)
+	s.completeOngoingRequest(reqID, true, resStr)
+	http.Redirect(w, r, "/userapi?result="+url.QueryEscape(resStr), http.StatusSeeOther)
+}
+
+func (s *HTTPServer) handleUserAPIWrite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
+		return
+	}
+
+	key := r.FormValue("key")
+	oldVal := r.FormValue("old_value")
+	newVal := r.FormValue("new_value")
+
+	reqID := s.addOngoingRequest("CompareAndWrite", key)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	userAPI := userapi.New(s.cell)
+	resp, err := userAPI.CompareAndWrite(ctx, key, []byte(oldVal), []byte(newVal))
+
+	if err != nil {
+		s.completeOngoingRequest(reqID, false, err.Error())
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+
+	if !resp.Success {
+		s.completeOngoingRequest(reqID, false, resp.Message)
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(resp.Message), http.StatusSeeOther)
+		return
+	}
+
+	s.completeOngoingRequest(reqID, true, "Success (Version "+strconv.FormatUint(resp.Version, 10)+")")
+	http.Redirect(w, r, "/userapi?success=true", http.StatusSeeOther)
+}
+
+func (s *HTTPServer) handleUserAPILockAcquire(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
+		return
+	}
+	keyPath := r.FormValue("key_path")
+	durationStr := r.FormValue("duration")
+	dur, err := strconv.ParseInt(durationStr, 10, 64)
+	if err != nil {
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape("invalid duration format"), http.StatusSeeOther)
+		return
+	}
+
+	reqID := s.addOngoingRequest("AcquireLock", keyPath)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	userAPI := userapi.New(s.cell)
+	resp, err := userAPI.AcquireLock(ctx, &paxosv1.AcquireLockRequest{KeyPath: keyPath, DurationMs: dur})
+	if err != nil {
+		s.completeOngoingRequest(reqID, false, err.Error())
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	if !resp.Success {
+		s.completeOngoingRequest(reqID, false, resp.Message)
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(resp.Message), http.StatusSeeOther)
+		return
+	}
+	s.completeOngoingRequest(reqID, true, "Lock Acquired")
+	http.Redirect(w, r, "/userapi?success=true", http.StatusSeeOther)
+}
+
+func (s *HTTPServer) handleUserAPILockRelease(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
+		return
+	}
+	keyPath := r.FormValue("key_path")
+
+	reqID := s.addOngoingRequest("ReleaseLock", keyPath)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	userAPI := userapi.New(s.cell)
+	resp, err := userAPI.ReleaseLock(ctx, &paxosv1.ReleaseLockRequest{KeyPath: keyPath})
+	if err != nil {
+		s.completeOngoingRequest(reqID, false, err.Error())
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	if !resp.Success {
+		s.completeOngoingRequest(reqID, false, resp.Message)
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(resp.Message), http.StatusSeeOther)
+		return
+	}
+	s.completeOngoingRequest(reqID, true, "Lock Released")
+	http.Redirect(w, r, "/userapi?success=true", http.StatusSeeOther)
+}
+
+func (s *HTTPServer) handleUserAPILockRenew(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
+		return
+	}
+	keyPath := r.FormValue("key_path")
+	durationStr := r.FormValue("duration")
+	dur, err := strconv.ParseInt(durationStr, 10, 64)
+	if err != nil {
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape("invalid duration format"), http.StatusSeeOther)
+		return
+	}
+
+	reqID := s.addOngoingRequest("RenewLock", keyPath)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	userAPI := userapi.New(s.cell)
+	resp, err := userAPI.RenewLock(ctx, &paxosv1.RenewLockRequest{KeyPath: keyPath, DurationMs: dur})
+	if err != nil {
+		s.completeOngoingRequest(reqID, false, err.Error())
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	if !resp.Success {
+		s.completeOngoingRequest(reqID, false, resp.Message)
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(resp.Message), http.StatusSeeOther)
+		return
+	}
+	s.completeOngoingRequest(reqID, true, "Lock Renewed")
+	http.Redirect(w, r, "/userapi?success=true", http.StatusSeeOther)
 }
 
 // maybeJSONToTable attempts to parse a string/byte slice as JSON.
@@ -803,138 +1176,4 @@ func (s *HTTPServer) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.renderFooter(w)
-}
-
-func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
-	_, shortName, err := s.store.GetAgentID()
-	if err != nil {
-		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
-		return
-	}
-
-	s.renderHeader(w, "User API", shortName, "userapi")
-
-	// Check for result flash message
-	statusMsg := ""
-	if r.URL.Query().Get("success") == "true" {
-		statusMsg = `<div class="alert alert-success mb-4" role="alert">Operation completed successfully.</div>`
-	} else if errMsg := r.URL.Query().Get("error"); errMsg != "" {
-		statusMsg = fmt.Sprintf(`<div class="alert alert-danger mb-4" role="alert">Operation failed: %s</div>`, html.EscapeString(errMsg))
-	} else if resultMsg := r.URL.Query().Get("result"); resultMsg != "" {
-		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert">Read Result: <code>%s</code></div>`, html.EscapeString(resultMsg))
-	}
-
-	fmt.Fprintf(w, `
-	  %s
-      <div class="row">
-        <div class="col-md-6">
-          <div class="card shadow-sm mb-4">
-            <div class="card-header bg-primary text-white">Read Key</div>
-            <div class="card-body">
-              <form action="/api/user/read" method="post">
-                <div class="mb-3">
-                  <label class="form-label">Key path</label>
-                  <input type="text" name="key" class="form-control" placeholder="/foo/bar" required>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">Quorum Requirement</label>
-                  <select name="quorum" class="form-select">
-                    <option value="LOCAL">Local (Current Peer Only)</option>
-                    <option value="MAJORITY" selected>Majority</option>
-                    <option value="ALL">All Peers</option>
-                  </select>
-                </div>
-                <button type="submit" class="btn btn-primary">Execute Read</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        
-        <div class="col-md-6">
-          <div class="card shadow-sm mb-4">
-            <div class="card-header bg-success text-white">Compare And Write</div>
-            <div class="card-body">
-              <form action="/api/user/write" method="post">
-                <div class="mb-3">
-                  <label class="form-label">Key path</label>
-                  <input type="text" name="key" class="form-control" placeholder="/foo/bar" required>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">Expected Old Value</label>
-                  <input type="text" name="old_value" class="form-control" placeholder="old value">
-                </div>
-                <div class="mb-3">
-                  <label class="form-label">New Value</label>
-                  <input type="text" name="new_value" class="form-control" placeholder="new value" required>
-                </div>
-                <button type="submit" class="btn btn-success">Execute CompareAndWrite</button>
-              </form>
-            </div>
-          </div>
-        </div>
-      </div>
-	`, statusMsg)
-
-	s.renderFooter(w)
-}
-
-func (s *HTTPServer) handleUserAPIRead(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
-		return
-	}
-
-	key := r.FormValue("key")
-	qStr := r.FormValue("quorum")
-
-	quorum := paxosv1.ReadQuorum_READ_QUORUM_UNSPECIFIED
-	switch qStr {
-	case "LOCAL":
-		quorum = paxosv1.ReadQuorum_READ_QUORUM_LOCAL
-	case "MAJORITY":
-		quorum = paxosv1.ReadQuorum_READ_QUORUM_MAJORITY
-	case "ALL":
-		quorum = paxosv1.ReadQuorum_READ_QUORUM_ALL
-	}
-
-	userAPI := userapi.New(s.cell)
-	resp, err := userAPI.Read(r.Context(), key, quorum)
-
-	if err != nil {
-		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
-		return
-	}
-
-	if resp == nil || resp.Value == nil {
-		http.Redirect(w, r, "/userapi?error="+url.QueryEscape("key not found"), http.StatusSeeOther)
-		return
-	}
-
-	http.Redirect(w, r, "/userapi?result="+url.QueryEscape(string(resp.Value)), http.StatusSeeOther)
-}
-
-func (s *HTTPServer) handleUserAPIWrite(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
-		return
-	}
-
-	key := r.FormValue("key")
-	oldVal := r.FormValue("old_value")
-	newVal := r.FormValue("new_value")
-
-	userAPI := userapi.New(s.cell)
-	resp, err := userAPI.CompareAndWrite(r.Context(), key, []byte(oldVal), []byte(newVal))
-
-	if err != nil {
-		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
-		return
-	}
-
-	if !resp.Success {
-		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(resp.Message), http.StatusSeeOther)
-		return
-	}
-
-	http.Redirect(w, r, "/userapi?success=true", http.StatusSeeOther)
 }

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"github.com/filmil/synod/internal/constants"
 	"context"
 	"fmt"
 	"os"
@@ -30,6 +31,7 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 		defer os.RemoveAll(tmpDir)
 
 		agents[i] = newAgentInstance(t, fmt.Sprintf("agent-%d", i), tmpDir, "127.0.0.1:0")
+		defer agents[i].stop()
 		go agents[i].run()
 		time.Sleep(500 * time.Millisecond) // Wait for server to be up
 	}
@@ -60,9 +62,9 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 		cancel()
 
 		// Set membership for new agent so it can sync
-		kvResp, _ := client.GetKVEntry(context.Background(), &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
-		agents[i].store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: "agent-0"}, kvResp.Value)
-		agents[i].store.CommitKV("/_internal/peers", kvResp.Value, "membership", kvResp.Version)
+		kvResp, _ := client.GetKVEntry(context.Background(), &paxosv1.GetKVEntryRequest{Key: constants.PeersKey})
+		agents[i].store.SetAcceptedValue(constants.PeersKey, &paxosv1.ProposalID{Number: kvResp.Version, AgentId: "agent-0"}, kvResp.Value)
+		agents[i].store.CommitKV(constants.PeersKey, kvResp.Value, "membership", kvResp.Version)
 		agents[i].cell.ApplyMembershipChange(kvResp.Value)
 
 		// Add agent-0 to ephemeral map so we can talk to it
@@ -74,14 +76,7 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 		agents[0].cell.ProposeMembership(context.Background(), agents[i].id, infoI)
 	}
 
-	// Start sync and ping loops
-	// Set a short ping interval for testing
-	pingInterval := 2 * time.Second
-	for i := 0; i < numAgents; i++ {
-		agents[i].cell.StartSyncLoop(context.Background(), 1*time.Second)
-		agents[i].cell.StartPingLoop(context.Background(), pingInterval)
-		agents[i].cell.StartEndpointSyncLoop(context.Background(), 2*time.Second)
-	}
+
 
 	// Wait for all agents to sync up the membership
 	time.Sleep(5 * time.Second)
@@ -118,7 +113,5 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 		t.Errorf("Expected 2 members, got %d", len(members))
 	}
 
-	// Cleanup
-	agents[0].stop()
-	agents[1].stop()
+
 }
