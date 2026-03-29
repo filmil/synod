@@ -94,6 +94,7 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	mux.HandleFunc("/api/user/lock/acquire", s.handleUserAPILockAcquire)
 	mux.HandleFunc("/api/user/lock/release", s.handleUserAPILockRelease)
 	mux.HandleFunc("/api/user/lock/renew", s.handleUserAPILockRenew)
+	mux.HandleFunc("/api/user/shutdown", s.handleUserAPIShutdown)
 
 	// Serve locally saved bootstrap via runfiles
 	mux.HandleFunc("/static/bootstrap.min.css", func(w http.ResponseWriter, r *http.Request) {
@@ -751,12 +752,22 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
                   <input type="text" name="key_path" class="form-control form-control-sm" placeholder="Key Path (/a/_lockable/b)" required>
                 </div>
                 <button type="submit" class="btn btn-sm btn-danger w-100">Release</button>
-              </form>
-            </div>
-          </div>
-        </div>
-      </div>
-	  %s
+                </form>
+                </div>
+                </div>
+
+                <div class="card shadow-sm mb-4 border-danger">
+                <div class="card-header bg-danger text-white">System Actions</div>
+                <div class="card-body">
+                <h6 class="card-title text-danger">Graceful Shutdown</h6>
+                <p class="small text-muted mb-2">Initiates lame duck mode (stops responding to requests) for 1m, then shuts down.</p>
+                <form action="/api/user/shutdown" method="post" onsubmit="return confirm('Are you sure you want to gracefully shut down this agent?');">
+                <button type="submit" class="btn btn-sm btn-outline-danger w-100">Shutdown Agent</button>
+                </form>
+                </div>
+                </div>
+                </div>
+                </div>
 	`, statusMsg, ongoingHTML)
 
 	s.renderFooter(w)
@@ -1179,4 +1190,33 @@ func (s *HTTPServer) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.renderFooter(w)
+}
+
+func (s *HTTPServer) handleUserAPIShutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
+		return
+	}
+
+	reqID := s.addOngoingRequest("Shutdown", "node")
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	userAPI := userapi.New(s.cell)
+	resp, err := userAPI.Shutdown(ctx, &paxosv1.ShutdownRequest{})
+
+	if err != nil {
+		s.completeOngoingRequest(reqID, false, err.Error())
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+
+	if !resp.Success {
+		s.completeOngoingRequest(reqID, false, resp.Message)
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(resp.Message), http.StatusSeeOther)
+		return
+	}
+
+	s.completeOngoingRequest(reqID, true, resp.Message)
+	http.Redirect(w, r, "/userapi?success=true", http.StatusSeeOther)
 }

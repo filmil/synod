@@ -148,6 +148,10 @@ func (s *PaxosServer) RenewLock(ctx context.Context, req *paxosv1.RenewLockReque
 	return s.userAPI.RenewLock(ctx, req)
 }
 
+func (s *PaxosServer) Shutdown(ctx context.Context, req *paxosv1.ShutdownRequest) (*paxosv1.ShutdownResponse, error) {
+	return s.userAPI.Shutdown(ctx, req)
+}
+
 
 func timeoutInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)

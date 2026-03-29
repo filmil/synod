@@ -232,6 +232,8 @@ func main() {
 		}
 	}
 
+	cell.SetSelfInfo(selfInfo)
+
 	// Start sync loop
 	cell.StartSyncLoop(context.Background(), 5*time.Second)
 
@@ -241,23 +243,41 @@ func main() {
 	// Start endpoint sync loop
 	cell.StartEndpointSyncLoop(context.Background(), 30*time.Second)
 
+	// Start self check loop
+	cell.StartSelfCheckLoop(context.Background(), 30*time.Second)
+
 	// Run servers
 	errChan := make(chan error, 2)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	go func() {
-		errChan <- server.RunGRPCServer(ctx, grpcLis, paxosSrv)
+		err := server.RunGRPCServer(ctx, grpcLis, paxosSrv)
+		if err != nil {
+			errChan <- err
+		}
 	}()
 
 	go func() {
 		httpSrv := server.NewHTTPServer(*httpAddr, store, cell)
-		errChan <- httpSrv.Run(httpLis)
+		err := httpSrv.Run(httpLis)
+		if err != nil {
+			errChan <- err
+		}
 	}()
 
 	glog.Infof("Synod agent is up and running")
 
-	if err := <-errChan; err != nil {
+	select {
+	case err := <-errChan:
 		glog.Errorf("Server error: %v", err)
 		os.Exit(1)
+	case <-cell.ShutdownChan:
+		glog.Infof("Shutdown triggered: entering lame duck mode for 1 minute")
+		grpcLis.Close()
+		httpLis.Close()
+		time.Sleep(1 * time.Minute)
+		glog.Infof("Lame duck mode finished. Shutting down gracefully.")
+		os.Exit(0)
 	}
 }

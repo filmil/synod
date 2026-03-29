@@ -59,6 +59,10 @@ type Cell struct {
 
 	// Optional hook for lock checking during Propose
 	lockChecker func(ctx context.Context, key string) error
+
+	ShutdownChan chan struct{}
+	shuttingDown bool
+	selfInfo     state.PeerInfo
 }
 
 func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory PeerFactory, selfGRPCAddr, selfHTTPURL string) *Cell {
@@ -71,6 +75,8 @@ func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory Pee
 		peerFactory:    factory,
 		selfGRPCAddr:   selfGRPCAddr,
 		selfHTTPURL:    selfHTTPURL,
+		ShutdownChan:   make(chan struct{}),
+		proposer:       NewProposer(agentID, []PeerClient{}, acceptor),
 	}
 	if selfGRPCAddr != "" || selfHTTPURL != "" {
 		c.ephemeralPeers[agentID] = ConnectionInfo{
@@ -78,8 +84,65 @@ func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory Pee
 			HTTPURL:  selfHTTPURL,
 		}
 	}
-	c.proposer = NewProposer(agentID, nil, acceptor)
 	return c
+}
+
+func (c *Cell) SetSelfInfo(info state.PeerInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.selfInfo = info
+}
+
+func (c *Cell) TriggerShutdown() {
+	c.mu.Lock()
+	if c.shuttingDown {
+		c.mu.Unlock()
+		return
+	}
+	c.shuttingDown = true
+	c.mu.Unlock()
+	close(c.ShutdownChan)
+}
+
+func (c *Cell) StartSelfCheckLoop(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				c.checkAndRejoin(ctx)
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+}
+
+func (c *Cell) checkAndRejoin(ctx context.Context) {
+	c.mu.Lock()
+	if c.shuttingDown {
+		c.mu.Unlock()
+		return
+	}
+	selfInfo := c.selfInfo
+	c.mu.Unlock()
+
+	members, err := c.store.GetMembers()
+	if err != nil {
+		glog.Errorf("Cell(%s): Failed to get members for self check: %v", c.agentID, err)
+		return
+	}
+
+	if _, ok := members[c.agentID]; !ok {
+		glog.Warningf("Cell(%s): Agent not found in peer set! Proposing auto-rejoin.", c.agentID)
+		err := c.ProposeMembership(ctx, c.agentID, selfInfo)
+		if err != nil {
+			glog.Errorf("Cell(%s): Auto-rejoin failed: %v", c.agentID, err)
+		} else {
+			glog.Infof("Cell(%s): Auto-rejoin proposed successfully", c.agentID)
+		}
+	}
 }
 
 func (c *Cell) SetLockChecker(checker func(ctx context.Context, key string) error) {
