@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -18,12 +17,18 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderHeader(w, "gRPC Introspection", shortName, "grpc")
+	data := GRPCData{
+		HeaderData: HeaderData{
+			Title:     "gRPC Introspection",
+			AgentName: shortName,
+			ActiveNav: "grpc",
+		},
+	}
 
 	eph, ok := s.cell.GetEphemeralPeer(agentID)
 	if !ok || eph.GRPCAddr == "" {
-		fmt.Fprintf(w, "<div class='alert alert-danger'>gRPC address not found for self</div>")
-		s.renderFooter(w)
+		data.SelfError = true
+		s.templates.ExecuteTemplate(w, "grpc.html", data)
 		return
 	}
 
@@ -32,8 +37,8 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := grpc.NewClient(eph.GRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		fmt.Fprintf(w, "<div class='alert alert-danger'>Failed to connect to local gRPC channelz: %v</div>", err)
-		s.renderFooter(w)
+		data.ConnectError = err
+		s.templates.ExecuteTemplate(w, "grpc.html", data)
 		return
 	}
 	defer conn.Close()
@@ -43,24 +48,9 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 	// Get Servers
 	serversResp, err := client.GetServers(ctx, &grpc_channelz_v1.GetServersRequest{})
 	if err != nil {
-		fmt.Fprintf(w, "<div class='alert alert-warning'>Failed to get servers: %v</div>", err)
+		data.ServersError = err
 	}
 
-	fmt.Fprintf(w, `<div class="card shadow-sm mb-4">
-        <div class="card-header bg-primary text-white">gRPC Servers</div>
-        <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-sm table-hover">
-              <thead>
-                <tr>
-                  <th>Server ID</th>
-                  <th>Calls Started</th>
-                  <th>Calls Succeeded</th>
-                  <th>Calls Failed</th>
-                  <th>Last Call Started</th>
-                </tr>
-              </thead>
-              <tbody>`)
 	if serversResp != nil && len(serversResp.Server) > 0 {
 		for _, srv := range serversResp.Server {
 			var started, succeeded, failed int64
@@ -73,36 +63,21 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 					lastCall = srv.Data.LastCallStartedTimestamp.AsTime().Format(time.RFC3339)
 				}
 			}
-			fmt.Fprintf(w, "<tr><td>%d</td><td>%d</td><td>%d</td><td>%d</td><td>%s</td></tr>",
-				srv.Ref.ServerId, started, succeeded, failed, lastCall)
+			data.Servers = append(data.Servers, ServerData{
+				ServerID:  srv.Ref.ServerId,
+				Started:   started,
+				Succeeded: succeeded,
+				Failed:    failed,
+				LastCall:  lastCall,
+			})
 		}
-	} else {
-		fmt.Fprintf(w, "<tr><td colspan='5'>No servers found</td></tr>")
 	}
-	fmt.Fprintf(w, `</tbody></table></div></div></div>`)
 
 	// Get Top Channels
 	channelsResp, err := client.GetTopChannels(ctx, &grpc_channelz_v1.GetTopChannelsRequest{})
 	if err != nil {
-		fmt.Fprintf(w, "<div class='alert alert-warning'>Failed to get top channels: %v</div>", err)
+		data.ChannelsError = err
 	}
-
-	fmt.Fprintf(w, `<div class="card shadow-sm mb-4">
-        <div class="card-header bg-success text-white">gRPC Top Channels</div>
-        <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-sm table-hover">
-              <thead>
-                <tr>
-                  <th>Channel ID</th>
-                  <th>Target</th>
-                  <th>State</th>
-                  <th>Calls Started</th>
-                  <th>Calls Succeeded</th>
-                  <th>Calls Failed</th>
-                </tr>
-              </thead>
-              <tbody>`)
 
 	if channelsResp != nil && len(channelsResp.Channel) > 0 {
 		for _, ch := range channelsResp.Channel {
@@ -121,13 +96,16 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 				succeeded = ch.Data.CallsSucceeded
 				failed = ch.Data.CallsFailed
 			}
-			fmt.Fprintf(w, "<tr><td>%d</td><td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%d</td></tr>",
-				chId, target, state, started, succeeded, failed)
+			data.Channels = append(data.Channels, ChannelData{
+				ChannelID: chId,
+				Target:    target,
+				State:     state,
+				Started:   started,
+				Succeeded: succeeded,
+				Failed:    failed,
+			})
 		}
-	} else {
-		fmt.Fprintf(w, "<tr><td colspan='6'>No channels found</td></tr>")
 	}
-	fmt.Fprintf(w, `</tbody></table></div></div></div>`)
 
-	s.renderFooter(w)
+	s.templates.ExecuteTemplate(w, "grpc.html", data)
 }

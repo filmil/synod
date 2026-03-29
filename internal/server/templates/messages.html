@@ -1,0 +1,49 @@
+{{template "header.html" .}}
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">Peer Mapping</div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <thead>
+                <tr>
+                  <th>Short Name</th><th>Agent ID</th><th>Endpoints</th>
+                </tr>
+              </thead>
+              <tbody>
+{{range .Peers}}                <tr>
+                  <td>{{.Label}}</td>
+                  <td><small class="text-muted">{{.ID}}</small></td>
+                  <td>{{.Endpoints}}</td>
+                </tr>
+{{end}}              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-secondary text-white">Recent Messages</div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <thead>
+                <tr>
+                  <th>ID</th><th>Time</th><th>Type</th><th>Sender</th><th>Receiver</th><th>Request</th><th>Reply</th>
+                </tr>
+              </thead>
+              <tbody>
+{{range .Messages}}                <tr>
+                  <td>{{.ID}}</td>
+                  <td><small class="text-nowrap">{{.Time}}</small></td>
+                  <td><span class="badge bg-info text-dark">{{.Type}}</span></td>
+                  <td>{{.Sender}}</td>
+                  <td>{{.Receiver}}</td>
+                  <td>{{.Request}}</td>
+                  <td>{{.Reply}}</td>
+                </tr>
+{{end}}              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+{{template "footer.html" .}}

@@ -1,0 +1,27 @@
+{{template "header.html" .}}
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-info text-white">Key-Value Store</div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Value</th>
+                  <th>Type</th>
+                  <th>Version</th>
+                </tr>
+              </thead>
+              <tbody>
+{{range .KVs}}                <tr>
+                  <td><code>{{.Key}}</code></td>
+                  <td>{{.Value}}</td>
+                  <td>{{.Type}}</td>
+                  <td>{{.Version}}</td>
+                </tr>
+{{end}}              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+{{template "footer.html" .}}

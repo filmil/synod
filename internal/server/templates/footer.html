@@ -1,0 +1,23 @@
+    </div>
+    <script src="/static/bootstrap.bundle.min.js"></script>
+    <script>
+      function setReload(ms) {
+        localStorage.setItem('reloadInterval', ms);
+        location.reload();
+      }
+      (function() {
+        const ms = parseInt(localStorage.getItem('reloadInterval')) ?? 60000;
+        const labelMap = {
+          1000: '1s', 10000: '10s', 30000: '30s', 60000: '1m',
+          300000: '5m', 600000: '10m', 1200000: '20m', 1800000: '30m',
+          3600000: '1h', 0: 'Off'
+        };
+        const label = labelMap[ms] || (ms > 0 ? (ms/1000 + 's') : 'Off');
+        document.getElementById('reloadLabel').innerText = label;
+        if (ms > 0) {
+          setTimeout(() => location.reload(), ms);
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,48 @@
+{{template "header.html" .}}
+      <div class="row">
+        <div class="col-md-4">
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-primary text-white">Agent Info</div>
+            <div class="card-body">
+              <p class="card-text"><strong>ID:</strong> <small class="text-muted">{{.AgentID}}</small></p>
+              <p class="card-text"><strong>Name:</strong> {{.AgentName}}</p>
+              <p class="card-text"><strong>Keys Count:</strong> {{.KeysCount}}</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-8">
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-success text-white">Participants</div>
+            <div class="card-body">
+              <div class="table-responsive">
+                <table class="table table-hover">
+                  <thead>
+                    <tr><th>Agent ID</th><th>Name</th><th>gRPC Address</th><th>HTTP Dashboard</th></tr>
+                  </thead>
+                  <tbody>
+{{range .Participants}}<tr><td><small>{{.Label}}</small></td><td>{{.ShortName}}</td><td><code>{{.GRPCAddr}}</code></td><td>{{.HTTPLink}}</td></tr>
+{{end}}                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-info text-white">Propose Command</div>
+            <div class="card-body">
+              <form action="/api/command" method="post" class="row g-3">
+                <div class="col-auto">
+                  <input type="text" name="key" class="form-control" placeholder="Key (e.g. /my/key)">
+                </div>
+                <div class="col-auto">
+                  <input type="text" name="value" class="form-control" placeholder="Value">
+                </div>
+                <div class="col-auto">
+                  <button type="submit" class="btn btn-primary">Propose</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+{{template "footer.html" .}}

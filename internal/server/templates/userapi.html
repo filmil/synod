@@ -1,0 +1,123 @@
+{{template "header.html" .}}
+	  {{if .HasSuccess}}
+	  <div class="alert alert-success mb-4" role="alert">Operation completed successfully.</div>
+	  {{else if .ErrorMsg}}
+	  <div class="alert alert-danger mb-4" role="alert">Operation failed: {{.ErrorMsg}}</div>
+	  {{else if .ResultMsg}}
+	  <div class="alert alert-info mb-4" role="alert">Read Result: <code>{{.ResultMsg}}</code></div>
+	  {{end}}
+
+      {{if .HasOngoing}}
+      <div class="card shadow-sm mb-4">
+			<div class="card-header bg-dark text-white">Recently Executed / Ongoing Requests</div>
+			<div class="card-body">
+				<div class="table-responsive">
+					<table class="table table-sm table-hover">
+						<thead><tr><th>Time</th><th>Type</th><th>Key</th><th>Status</th><th>Result</th></tr></thead>
+						<tbody>
+                        {{range .Ongoing}}<tr><td>{{.Time}}</td><td>{{.Type}}</td><td><code>{{.Key}}</code></td><td>{{.Status}}</td><td><small>{{.Result}}</small></td></tr>{{end}}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+      </div>
+      {{end}}
+
+      <div class="row">
+        <div class="col-md-4">
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-primary text-white">Read Key</div>
+            <div class="card-body">
+              <form action="/api/user/read" method="post">
+                <div class="mb-3">
+                  <label class="form-label">Key path</label>
+                  <input type="text" name="key" class="form-control" placeholder="/foo/bar" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Quorum Requirement</label>
+                  <select name="quorum" class="form-select">
+                    <option value="LOCAL">Local (Current Peer Only)</option>
+                    <option value="MAJORITY" selected>Majority</option>
+                    <option value="ALL">All Peers</option>
+                  </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Execute Read</button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-success text-white">Compare And Write</div>
+            <div class="card-body">
+              <form action="/api/user/write" method="post">
+                <div class="mb-3">
+                  <label class="form-label">Key path</label>
+                  <input type="text" name="key" class="form-control" placeholder="/foo/bar" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Expected Old Value</label>
+                  <input type="text" name="old_value" class="form-control" placeholder="old value">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">New Value</label>
+                  <input type="text" name="new_value" class="form-control" placeholder="new value" required>
+                </div>
+                <button type="submit" class="btn btn-success">Execute CompareAndWrite</button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-4">
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-warning text-dark">Lock Management</div>
+            <div class="card-body">
+              <h6 class="card-title">Acquire Lock</h6>
+              <form action="/api/user/lock/acquire" method="post" class="mb-3">
+                <div class="mb-2">
+                  <input type="text" name="key_path" class="form-control form-control-sm" placeholder="Key Path (/a/_lockable/b)" required>
+                </div>
+                <div class="mb-2">
+                  <input type="number" name="duration" class="form-control form-control-sm" placeholder="Duration (ms)" required>
+                </div>
+                <button type="submit" class="btn btn-sm btn-warning w-100">Acquire</button>
+              </form>
+
+              <hr>
+              <h6 class="card-title">Renew Lock</h6>
+              <form action="/api/user/lock/renew" method="post" class="mb-3">
+                <div class="mb-2">
+                  <input type="text" name="key_path" class="form-control form-control-sm" placeholder="Key Path (/a/_lockable/b)" required>
+                </div>
+                <div class="mb-2">
+                  <input type="number" name="duration" class="form-control form-control-sm" placeholder="Duration (ms)" required>
+                </div>
+                <button type="submit" class="btn btn-sm btn-info w-100">Renew</button>
+              </form>
+
+              <hr>
+              <h6 class="card-title">Release Lock</h6>
+              <form action="/api/user/lock/release" method="post">
+                <div class="mb-2">
+                  <input type="text" name="key_path" class="form-control form-control-sm" placeholder="Key Path (/a/_lockable/b)" required>
+                </div>
+                <button type="submit" class="btn btn-sm btn-danger w-100">Release</button>
+                </form>
+                </div>
+                </div>
+
+                <div class="card shadow-sm mb-4 border-danger">
+                <div class="card-header bg-danger text-white">System Actions</div>
+                <div class="card-body">
+                <h6 class="card-title text-danger">Graceful Shutdown</h6>
+                <p class="small text-muted mb-2">Initiates lame duck mode (stops responding to requests) for 1m, then shuts down.</p>
+                <form action="/api/user/shutdown" method="post" onsubmit="return confirm('Are you sure you want to gracefully shut down this agent?');">
+                <button type="submit" class="btn btn-sm btn-outline-danger w-100">Shutdown Agent</button>
+                </form>
+                </div>
+                </div>
+                </div>
+                </div>
+{{template "footer.html" .}}

@@ -1,0 +1,37 @@
+{{template "header.html" .}}
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-info text-white">Go Runtime Statistics</div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <tbody>
+                <tr><th class="w-25">Available CPUs</th><td>{{.NumCPU}}</td></tr>
+                <tr><th>Active Goroutines</th><td>{{.NumGoroutines}}</td></tr>
+                <tr><th>Allocated Memory (Alloc)</th><td>{{.Alloc}} bytes ({{printf "%.2f" .AllocMB}} MB)</td></tr>
+                <tr><th>Total Allocated (TotalAlloc)</th><td>{{.TotalAlloc}} bytes ({{printf "%.2f" .TotalAllocMB}} MB)</td></tr>
+                <tr><th>System Memory (Sys)</th><td>{{.Sys}} bytes ({{printf "%.2f" .SysMB}} MB)</td></tr>
+                <tr><th>Number of GCs</th><td>{{.NumGC}}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      {{if .DumpGoroutines}}
+      <div class="card shadow-sm mb-4">
+        <div class="card-header bg-warning text-dark">
+          Goroutine Stack Dump
+          <a href="/system" class="btn btn-sm btn-outline-dark float-end">Clear Dump</a>
+        </div>
+        <div class="card-body">
+          <pre class="small bg-dark text-light p-3 rounded" style="max-height: 500px; overflow-y: auto;"><code>{{.Goroutines}}</code></pre>
+        </div>
+      </div>
+      {{else}}
+      <div class="card shadow-sm mb-4 border-warning">
+        <div class="card-body text-center">
+          <p class="mb-3">Need to debug a deadlock or performance issue?</p>
+          <a href="/system?dump=goroutines" class="btn btn-warning">Generate Goroutine Stack Dump</a>
+        </div>
+      </div>
+      {{end}}
+{{template "footer.html" .}}

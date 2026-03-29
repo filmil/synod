@@ -1,0 +1,8 @@
+{{template "header.html" .}}
+      <div class="alert alert-success" role="alert">
+        <h4 class="alert-heading">Success!</h4>
+        <p>Consensus reached for key <code>{{.Key}}</code> with value: <code>{{.Value}}</code>.</p>
+        <hr>
+        <a href="/" class="btn btn-primary">Back to Status</a>
+      </div>
+{{template "footer.html" .}}
