@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 
 	"github.com/golang/glog"
 	"github.com/google/uuid"
@@ -20,6 +23,17 @@ const schemaVersion = 1
 // Key-Value data, cluster membership, and a message log. It is backed by SQLite.
 type Store struct {
 	db *sql.DB
+	mu sync.RWMutex
+
+	// In-memory storage for keys starting with /_internal
+	internalKVs           map[string]KVEntry
+	internalAcceptorState map[string]acceptorState
+}
+
+type acceptorState struct {
+	promisedID    *paxosv1.ProposalID
+	acceptedID    *paxosv1.ProposalID
+	acceptedValue []byte
 }
 
 // NewStore initializes a new Store, creating the necessary database files and schema.
@@ -38,7 +52,20 @@ func NewStore(stateDir string) (*Store, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	s := &Store{db: db}
+	// Set SQLite to exclusive locking mode
+	if _, err := db.Exec("PRAGMA locking_mode = EXCLUSIVE;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to set exclusive locking mode: %w", err)
+	}
+
+	// Limit to a single connection to avoid "database is locked" when using EXCLUSIVE mode.
+	db.SetMaxOpenConns(1)
+
+	s := &Store{
+		db:                    db,
+		internalKVs:           make(map[string]KVEntry),
+		internalAcceptorState: make(map[string]acceptorState),
+	}
 	if err := s.init(); err != nil {
 		db.Close()
 		return nil, err
@@ -169,6 +196,15 @@ func (s *Store) Close() error {
 // GetAcceptorState retrieves the highest promised and accepted proposal IDs, and the
 // accepted value for a given key.
 func (s *Store) GetAcceptorState(key string) (promisedID *paxosv1.ProposalID, acceptedID *paxosv1.ProposalID, acceptedValue []byte, err error) {
+	if strings.HasPrefix(key, "/_internal") {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		if state, ok := s.internalAcceptorState[key]; ok {
+			return state.promisedID, state.acceptedID, state.acceptedValue, nil
+		}
+		return nil, nil, nil, nil
+	}
+
 	var pIDNum, aIDNum sql.NullInt64
 	var pIDAgent, aIDAgent sql.NullString
 
@@ -196,6 +232,15 @@ func (s *Store) GetAcceptorState(key string) (promisedID *paxosv1.ProposalID, ac
 
 // SetPromisedID records a promise not to accept proposals with a lower ID for a given key.
 func (s *Store) SetPromisedID(key string, id *paxosv1.ProposalID) error {
+	if strings.HasPrefix(key, "/_internal") {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		st := s.internalAcceptorState[key]
+		st.promisedID = id
+		s.internalAcceptorState[key] = st
+		return nil
+	}
+
 	_, err := s.db.Exec(`
 		INSERT INTO acceptor_state (key, promised_id_num, promised_id_agent)
 		VALUES (?, ?, ?)
@@ -211,6 +256,17 @@ func (s *Store) SetPromisedID(key string, id *paxosv1.ProposalID) error {
 
 // SetAcceptedValue records the acceptance of a proposal for a given key.
 func (s *Store) SetAcceptedValue(key string, id *paxosv1.ProposalID, value []byte) error {
+	if strings.HasPrefix(key, "/_internal") {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		st := s.internalAcceptorState[key]
+		st.promisedID = id
+		st.acceptedID = id
+		st.acceptedValue = value
+		s.internalAcceptorState[key] = st
+		return nil
+	}
+
 	_, err := s.db.Exec(`
 		INSERT INTO acceptor_state (key, promised_id_num, promised_id_agent, accepted_id_num, accepted_id_agent, accepted_value)
 		VALUES (?, ?, ?, ?, ?, ?)
@@ -290,6 +346,19 @@ func (s *Store) GetMembers() (map[string]PeerInfo, error) {
 // If the value is empty, the entry is marked as deleted.
 func (s *Store) CommitKV(key string, value []byte, valType string, version uint64) error {
 	deleted := len(value) == 0
+	if strings.HasPrefix(key, "/_internal") {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.internalKVs[key] = KVEntry{
+			Key:     key,
+			Value:   value,
+			Type:    valType,
+			Version: version,
+			Deleted: deleted,
+		}
+		return nil
+	}
+
 	_, err := s.db.Exec(`
 		INSERT INTO kv_store (key, value, type, version, deleted) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(key) DO UPDATE SET
@@ -325,11 +394,28 @@ func (s *Store) GetKVState() (map[string]uint64, error) {
 			keys[k] = 0
 		}
 	}
+
+	// Merge with in-memory internal KVs
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for k, e := range s.internalKVs {
+		keys[k] = e.Version
+	}
+
 	return keys, nil
 }
 
 // GetKVEntry retrieves the value, type, version, and deletion status of a specific key.
 func (s *Store) GetKVEntry(key string) (value []byte, valType string, version uint64, deleted bool, err error) {
+	if strings.HasPrefix(key, "/_internal") {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		if e, ok := s.internalKVs[key]; ok {
+			return e.Value, e.Type, e.Version, e.Deleted, nil
+		}
+		return nil, "", 0, false, nil
+	}
+
 	var pn sql.NullInt64
 	err = s.db.QueryRow("SELECT value, type, version, deleted FROM kv_store WHERE key = ?", key).Scan(&value, &valType, &pn, &deleted)
 	if err == sql.ErrNoRows {
@@ -375,6 +461,21 @@ func (s *Store) GetAllKVs() ([]KVEntry, error) {
 		}
 		entries = append(entries, e)
 	}
+
+	// Add in-memory internal KVs
+	s.mu.RLock()
+	for _, e := range s.internalKVs {
+		if !e.Deleted {
+			entries = append(entries, e)
+		}
+	}
+	s.mu.RUnlock()
+
+	// Sort the merged entries by key
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Key < entries[j].Key
+	})
+
 	return entries, nil
 }
 
