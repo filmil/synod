@@ -66,15 +66,41 @@ wait $PID1 $PID2 $PID3
 
 ## Features & Current State
 
-- **Key-Value Store:** Implements standard Paxos consensus bound to unix-path keys (e.g. `/system/config`).
+- **Key-Value Store:** Implements standard Paxos consensus bound to unix-path
+  keys (e.g. `/system/config`).
 - **Persistence:** SQLite backed via `mattn/go-sqlite3`.
-- **Dynamic Membership:** Nodes can dynamically join the cluster via gRPC. Network membership itself is managed within the KV Store under the `/_internal/peers` key using optimistic concurrency/versioning.
-- **Identities & Short Names:** Agents are assigned a unique UUID alongside a randomly selected human-readable short name for easier identification in dashboards.
-- **Dynamic Port Selection:** If a requested gRPC or HTTP port is unavailable, the agent automatically attempts to find and bind to a free port.
-- **Sync:** Nodes continuously synchronize their KV store versions in the background, recovering any missing keys or resolving out-of-date versions.
-- **Peer Health Monitoring:** Periodically pings all known peers to monitor availability. If a peer fails to respond, a Paxos proposal is automatically initiated to remove the unresponsive node from the cluster membership.
-- **Web UI:** Includes a simple embedded HTTP dashboard (styled with Bootstrap) to inspect the node's local view of participants (always includes itself), read the raw Key-Value Store, examine the pretty-printed RPC message log, and issue custom data proposals.
-- **Graceful Error Handling:** Top-level application errors safely abort the process with a clean exit code rather than crashing with panic traces.
+- **Dynamic Membership:** Nodes can dynamically join the cluster via gRPC.
+  Network membership itself is managed within the KV Store under the
+  `/_internal/peers` key using optimistic concurrency/versioning.
+- **Identities & Short Names:** Agents are assigned a unique UUID alongside a
+  randomly selected human-readable short name for easier identification in
+  dashboards.
+- **Dynamic Port Selection:** If a requested gRPC or HTTP port is unavailable,
+  the agent automatically attempts to find and bind to a free port.
+- **Sync & Peer Health Monitoring:** Nodes continuously synchronize their KV
+  store versions in the background, recovering any missing keys or resolving
+  out-of-date versions. Periodically pings all known peers to monitor
+  availability. If a peer fails to respond, a Paxos proposal is automatically
+  initiated to remove the unresponsive node from the cluster membership.
+- **User API:** Provides a dedicated gRPC and HTTP interface for users to
+  interact with the cluster. Supports reading values with specific quorum
+  requirements (Local, Majority, All) and writing values using Compare-and-Swap
+  (CAS) semantics via `CompareAndWrite`.
+- **Hierarchical Locking:** Allows users to acquire distributed locks on key
+  paths. If a path contains `_lockable` segments (e.g.,
+  `/foo/_lockable/bar/_lockable/baz`), the system automatically acquires and
+  verifies locks sequentially from top to bottom. Operations on locked paths
+  are strictly rejected if the lock is held by another agent or expired.
+- **Robust Retries & Quorums:** Network and consensus operations utilize
+  exponential backoff for transient failures. Lock acquisitions and writes
+  require a `QuorumMajority`, while releasing locks requires a `QuorumAll`
+  consensus to guarantee cluster-wide consistency.
+- **Web UI & Introspection:** Includes an embedded HTTP dashboard to inspect
+  participants, read the Key-Value Store, and examine the RPC message log. The
+  UI features a dedicated User API panel with a real-time table of ongoing
+  requests, JSON pretty-printing, and runtime introspection (CPU/memory/stack).
+- **Graceful Error Handling:** Top-level application errors safely abort the
+  process with a clean exit code rather than crashing with panic traces.
 
 ## Running the Agent
 
