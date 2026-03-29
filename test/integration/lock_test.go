@@ -72,7 +72,8 @@ func TestIntegration_Locks(t *testing.T) {
 	// Test 1: Acquire lock on /foo/_lockable/bar
 	// This should acquire lock on /foo/_lockable
 	glog.V(1).Infof("Test 1")
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute+30*time.Second)
+	defer cancel()
 
 	resp, err := agents[0].srv.AcquireLock(ctx, &paxosv1.AcquireLockRequest{
 		KeyPath:    "/foo/_lockable/bar",
@@ -125,7 +126,7 @@ func TestIntegration_Locks(t *testing.T) {
 	// Agent 1 must acquire the lock first because /foo/_lockable/bar is a lockable path.
 	bo := backoff.New()
 	bo.MaxElapsedTime = 30 * time.Second
-	
+
 	err = bo.Retry(ctx, "Test5_AcquireLock", func() error {
 		resp, err = agents[1].srv.AcquireLock(ctx, &paxosv1.AcquireLockRequest{
 			KeyPath:    "/foo/_lockable/bar",
@@ -151,5 +152,55 @@ func TestIntegration_Locks(t *testing.T) {
 	})
 	if err != nil || !writeResp.Success {
 		t.Fatalf("Agent 1 failed to write to unlocked path: %v / %s", err, writeResp.GetMessage())
+	}
+
+	// Test 6: Nested locks (multiple _lockable components)
+	glog.V(1).Infof("Test 6: Acquire nested lock on /nested/_lockable/path/_lockable/baz")
+	nestedResp, err := agents[0].srv.AcquireLock(ctx, &paxosv1.AcquireLockRequest{
+		KeyPath:    "/nested/_lockable/path/_lockable/baz",
+		DurationMs: 10000,
+	})
+	if err != nil || !nestedResp.Success {
+		t.Fatalf("Agent 0 failed to acquire nested lock: %v / %s", err, nestedResp.GetMessage())
+	}
+
+	time.Sleep(2 * time.Second)
+
+	// Agent 1 tries to write to the full nested path (should fail because it doesn't hold the lock)
+	nestedWriteResp, err := agents[1].srv.CompareAndWrite(ctx, &paxosv1.CompareAndWriteRequest{
+		Key:      "/nested/_lockable/path/_lockable/baz",
+		OldValue: nil,
+		NewValue: []byte("hacked-nested"),
+	})
+	if err == nil && nestedWriteResp.Success {
+		t.Fatalf("Agent 1 successfully wrote to locked nested path without owning the lock!")
+	}
+
+	// Agent 1 tries to write to a path protected by ONLY the first level lock (should fail)
+	nestedWriteResp, err = agents[1].srv.CompareAndWrite(ctx, &paxosv1.CompareAndWriteRequest{
+		Key:      "/nested/_lockable/other",
+		OldValue: nil,
+		NewValue: []byte("hacked-first-level"),
+	})
+	if err == nil && nestedWriteResp.Success {
+		t.Fatalf("Agent 1 successfully wrote to first-level locked path without owning the lock!")
+	}
+
+	// Agent 0 writes to the full nested path (should succeed)
+	nestedWriteResp, err = agents[0].srv.CompareAndWrite(ctx, &paxosv1.CompareAndWriteRequest{
+		Key:      "/nested/_lockable/path/_lockable/baz",
+		OldValue: nil,
+		NewValue: []byte("legit-nested"),
+	})
+	if err != nil || !nestedWriteResp.Success {
+		t.Fatalf("Agent 0 failed to write to its own locked nested path: %v / %v", err, nestedWriteResp.Message)
+	}
+
+	// Release nested locks
+	nestedRelResp, err := agents[0].srv.ReleaseLock(ctx, &paxosv1.ReleaseLockRequest{
+		KeyPath: "/nested/_lockable/path/_lockable/baz",
+	})
+	if err != nil || !nestedRelResp.Success {
+		t.Fatalf("Release nested lock failed: %v", err)
 	}
 }
