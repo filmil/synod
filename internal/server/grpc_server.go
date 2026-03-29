@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/channelz/service"
 )
 
+// PaxosServer implements both the internal PaxosService and the client-facing UserService over gRPC.
 type PaxosServer struct {
 	paxosv1.UnimplementedPaxosServiceServer
 	paxosv1.UnimplementedUserServiceServer
@@ -24,6 +25,7 @@ type PaxosServer struct {
 	userAPI  *userapi.UserAPI
 }
 
+// NewPaxosServer initializes a new PaxosServer.
 func NewPaxosServer(agentID string, store *state.Store, acceptor *paxos.Acceptor, cell *paxos.Cell) *PaxosServer {
 	return &PaxosServer{
 		agentID:  agentID,
@@ -34,14 +36,17 @@ func NewPaxosServer(agentID string, store *state.Store, acceptor *paxos.Acceptor
 	}
 }
 
+// Prepare handles the Phase 1a of the Paxos protocol.
 func (s *PaxosServer) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*paxosv1.PromiseResponse, error) {
 	return s.acceptor.Prepare(ctx, req)
 }
 
+// Accept handles the Phase 2a of the Paxos protocol.
 func (s *PaxosServer) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*paxosv1.AcceptedResponse, error) {
 	return s.acceptor.Accept(ctx, req)
 }
 
+// JoinCluster processes a request from a new node attempting to join the cluster.
 func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error) {
 	glog.Infof("gRPC: Received JoinCluster from %s at %s", req.AgentId, req.HostPort)
 	// Update ephemeral map
@@ -66,6 +71,7 @@ func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterR
 	}, nil
 }
 
+// Sync returns the highest known version numbers for all keys in the local store.
 func (s *PaxosServer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error) {
 	// Update ephemeral map
 	s.cell.UpdateEphemeralPeer(req.AgentId, req.HostPort, req.HttpUrl)
@@ -80,6 +86,7 @@ func (s *PaxosServer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxo
 	}, nil
 }
 
+// GetKVEntry returns the current state of a specific key from the local store.
 func (s *PaxosServer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error) {
 	val, valType, propNum, _, err := s.store.GetKVEntry(req.Key)
 	if err != nil {
@@ -93,6 +100,7 @@ func (s *PaxosServer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryReq
 	}, nil
 }
 
+// Ping responds to a liveness check and exchanges endpoint information.
 func (s *PaxosServer) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error) {
 	// Update ephemeral map
 	s.cell.UpdateEphemeralPeer(req.AgentId, req.HostPort, req.HttpUrl)
@@ -108,6 +116,7 @@ func (s *PaxosServer) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxo
 	}, nil
 }
 
+// GetPeerEndpoints returns a snapshot of all known peers and their endpoints.
 func (s *PaxosServer) GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeerEndpointsRequest) (*paxosv1.GetPeerEndpointsResponse, error) {
 	resp := &paxosv1.GetPeerEndpointsResponse{
 		Endpoints: make(map[string]*paxosv1.EndpointInfo),
@@ -123,10 +132,12 @@ func (s *PaxosServer) GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeer
 	return resp, nil
 }
 
+// Read handles a client request to read a key with a specified consistency quorum.
 func (s *PaxosServer) Read(ctx context.Context, req *paxosv1.ReadRequest) (*paxosv1.ReadResponse, error) {
 	return s.userAPI.Read(ctx, req.Key, req.Quorum)
 }
 
+// CompareAndWrite handles a client request to atomically update a key's value.
 func (s *PaxosServer) CompareAndWrite(ctx context.Context, req *paxosv1.CompareAndWriteRequest) (*paxosv1.CompareAndWriteResponse, error) {
 	qt := paxos.QuorumMajority
 	if req.Quorum == paxosv1.WriteQuorum_WRITE_QUORUM_ALL {
@@ -136,14 +147,17 @@ func (s *PaxosServer) CompareAndWrite(ctx context.Context, req *paxosv1.CompareA
 }
 
 
+// AcquireLock handles a client request to acquire a distributed lock.
 func (s *PaxosServer) AcquireLock(ctx context.Context, req *paxosv1.AcquireLockRequest) (*paxosv1.AcquireLockResponse, error) {
 	return s.userAPI.AcquireLock(ctx, req)
 }
 
+// ReleaseLock handles a client request to release a distributed lock.
 func (s *PaxosServer) ReleaseLock(ctx context.Context, req *paxosv1.ReleaseLockRequest) (*paxosv1.ReleaseLockResponse, error) {
 	return s.userAPI.ReleaseLock(ctx, req)
 }
 
+// RenewLock handles a client request to extend a distributed lock's duration.
 func (s *PaxosServer) RenewLock(ctx context.Context, req *paxosv1.RenewLockRequest) (*paxosv1.RenewLockResponse, error) {
 	return s.userAPI.RenewLock(ctx, req)
 }
@@ -159,6 +173,7 @@ func timeoutInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySe
 	return handler(ctx, req)
 }
 
+// RunGRPCServer starts the gRPC server and registers the Paxos and User APIs.
 func RunGRPCServer(ctx context.Context, lis net.Listener, srv *PaxosServer) error {
 	s := grpc.NewServer(grpc.UnaryInterceptor(timeoutInterceptor))
 

@@ -18,31 +18,51 @@ import (
 	"github.com/google/uuid"
 )
 
+// MembershipChange describes a cluster membership change.
 type MembershipChange struct {
-	Action  string `json:"action"`
+	// Action is the type of change (e.g. "add", "remove").
+	Action string `json:"action"`
+	// AgentID is the ID of the agent being changed.
 	AgentID string `json:"agent_id"`
+	// Address is the address of the agent being added.
 	Address string `json:"address"`
 }
 
+// PeerClient represents an interface for communicating with a remote Paxos peer.
 type PeerClient interface {
+	// Prepare sends a PrepareRequest to the remote peer.
 	Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*paxosv1.PromiseResponse, error)
+	// Accept sends an AcceptRequest to the remote peer.
 	Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*paxosv1.AcceptedResponse, error)
+	// JoinCluster requests the remote peer to allow this agent to join the cluster.
 	JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error)
+	// Sync synchronizes data with the remote peer.
 	Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error)
+	// GetKVEntry retrieves a key-value entry from the remote peer.
 	GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error)
+	// Ping sends a PingRequest to check if the peer is alive.
 	Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error)
+	// GetPeerEndpoints fetches endpoint information from the peer.
 	GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeerEndpointsRequest) (*paxosv1.GetPeerEndpointsResponse, error)
+	// AgentID returns the ID of the remote peer.
 	AgentID() string
+	// Close terminates the connection to the peer.
 	Close() error
 }
 
+// PeerFactory creates a PeerClient given an agent ID and address.
 type PeerFactory func(agentID, address string) (PeerClient, error)
 
+// ConnectionInfo encapsulates network connection details for an agent.
 type ConnectionInfo struct {
+	// GRPCAddr is the host:port for gRPC communication.
 	GRPCAddr string
-	HTTPURL  string
+	// HTTPURL is the base URL for the agent's HTTP dashboard.
+	HTTPURL string
 }
 
+// Cell coordinates the Paxos consensus process for this agent, managing
+// communication with peers, handling proposals, and maintaining state.
 type Cell struct {
 	agentID  string
 	store    *state.Store
@@ -65,6 +85,7 @@ type Cell struct {
 	selfInfo     state.PeerInfo
 }
 
+// NewCell creates and initializes a new Cell.
 func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory PeerFactory, selfGRPCAddr, selfHTTPURL string) *Cell {
 	c := &Cell{
 		agentID:        agentID,
@@ -145,10 +166,12 @@ func (c *Cell) checkAndRejoin(ctx context.Context) {
 	}
 }
 
+// SetLockChecker configures an optional hook for checking locks during proposals.
 func (c *Cell) SetLockChecker(checker func(ctx context.Context, key string) error) {
 	c.lockChecker = checker
 }
 
+// SetSelfAddress updates the node's own address information.
 func (c *Cell) SetSelfAddress(grpcAddr, httpURL string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -160,6 +183,7 @@ func (c *Cell) SetSelfAddress(grpcAddr, httpURL string) {
 	}
 }
 
+// UpdateEphemeralPeer updates the known endpoint information for a specific peer.
 func (c *Cell) UpdateEphemeralPeer(agentID, grpcAddr, httpURL string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -169,6 +193,7 @@ func (c *Cell) UpdateEphemeralPeer(agentID, grpcAddr, httpURL string) {
 	}
 }
 
+// GetEphemeralPeers returns a snapshot of all known peer endpoint connections.
 func (c *Cell) GetEphemeralPeers() map[string]ConnectionInfo {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -179,6 +204,7 @@ func (c *Cell) GetEphemeralPeers() map[string]ConnectionInfo {
 	return res
 }
 
+// GetEphemeralPeer returns the known endpoint information for a given agent ID.
 func (c *Cell) GetEphemeralPeer(agentID string) (ConnectionInfo, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -186,6 +212,7 @@ func (c *Cell) GetEphemeralPeer(agentID string) (ConnectionInfo, bool) {
 	return info, ok
 }
 
+// SetPeers directly sets the internal list of connected peers.
 func (c *Cell) SetPeers(peers []PeerClient) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -196,6 +223,8 @@ func (c *Cell) SetPeers(peers []PeerClient) {
 	c.proposer = NewProposer(c.agentID, peers, c.acceptor)
 }
 
+// Propose attempts to reach consensus on updating a key with a new value using the
+// specified quorum constraint. It automatically retries on concurrent modification errors.
 func (c *Cell) Propose(ctx context.Context, key string, value []byte, qt QuorumType) error {
 	bo := backoff.New()
 	bo.MaxElapsedTime = 2 * time.Minute
@@ -234,6 +263,7 @@ func (c *Cell) Propose(ctx context.Context, key string, value []byte, qt QuorumT
 	})
 }
 
+// ProposeMembership initiates a proposal to add or update an agent's membership in the cluster.
 func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state.PeerInfo) error {
 	key := constants.PeersKey
 	bo := backoff.New()
@@ -298,6 +328,7 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 	})
 }
 
+// ProposeRemoval initiates a proposal to remove an agent from the cluster's membership.
 func (c *Cell) ProposeRemoval(ctx context.Context, agentID string) error {
 	key := constants.PeersKey
 	bo := backoff.New()
@@ -354,6 +385,7 @@ func (c *Cell) ProposeRemoval(ctx context.Context, agentID string) error {
 	})
 }
 
+// ApplyMembershipChange updates the local state to reflect a new cluster membership map.
 func (c *Cell) ApplyMembershipChange(value []byte) {
 	var peers map[string]state.PeerInfo
 	if err := json.Unmarshal(value, &peers); err != nil {
@@ -433,6 +465,7 @@ func (c *Cell) refreshPeers(ctx context.Context) {
 	c.proposer = NewProposer(c.agentID, peerList, c.acceptor)
 }
 
+// StartSyncLoop periodically triggers synchronization of state with all active peers.
 func (c *Cell) StartSyncLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
@@ -448,6 +481,7 @@ func (c *Cell) StartSyncLoop(ctx context.Context, interval time.Duration) {
 	}()
 }
 
+// StartPingLoop periodically triggers liveness checks and endpoint updates for all active peers.
 func (c *Cell) StartPingLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
@@ -463,6 +497,7 @@ func (c *Cell) StartPingLoop(ctx context.Context, interval time.Duration) {
 	}()
 }
 
+// PingPeers performs a one-off ping to all active peers.
 func (c *Cell) PingPeers(ctx context.Context) {
 	glog.V(3).Infof("Cell(%s): Pinging peers", c.agentID)
 	c.refreshPeers(ctx)
@@ -497,6 +532,8 @@ func (c *Cell) PingPeers(ctx context.Context) {
 	}
 }
 
+// SyncWithPeers exchanges version information with peers and downloads updated data if
+// a peer has a more recent version of any key.
 func (c *Cell) SyncWithPeers(ctx context.Context) {
 	c.refreshPeers(ctx)
 
@@ -541,6 +578,7 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 	}
 }
 
+// CatchUp fetches the latest value of a specific key from a peer and applies it locally.
 func (c *Cell) CatchUp(ctx context.Context, p PeerClient, key string) {
 	resp, err := p.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: key})
 	if err != nil {
@@ -566,6 +604,7 @@ func (c *Cell) CatchUp(ctx context.Context, p PeerClient, key string) {
 	}
 }
 
+// GetSyncState retrieves a map of all keys and their highest known consensus version numbers.
 func (c *Cell) GetSyncState() (map[string]uint64, error) {
 	keys, err := c.store.GetKVState()
 	if err != nil {
@@ -590,6 +629,7 @@ func (c *Cell) GetStore() *state.Store {
 	return c.store
 }
 
+// StartEndpointSyncLoop periodically requests updated endpoints for missing peers from active peers.
 func (c *Cell) StartEndpointSyncLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {

@@ -11,12 +11,14 @@ import (
 	"google.golang.org/protobuf/encoding/prototext"
 )
 
+// Acceptor handles the receiving end of the Paxos protocol, promising and accepting proposals.
 type Acceptor struct {
 	agentID string
 	store   *state.Store
 	mu      sync.Mutex
 }
 
+// NewAcceptor creates and returns a new Acceptor.
 func NewAcceptor(agentID string, store *state.Store) *Acceptor {
 	return &Acceptor{
 		agentID: agentID,
@@ -24,6 +26,7 @@ func NewAcceptor(agentID string, store *state.Store) *Acceptor {
 	}
 }
 
+// Prepare processes a PrepareRequest (Phase 1a) and determines whether to issue a promise (Phase 1b).
 func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*paxosv1.PromiseResponse, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -69,6 +72,7 @@ func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*p
 	return resp, nil
 }
 
+// Accept processes an AcceptRequest (Phase 2a) and determines whether to accept the proposed value (Phase 2b).
 func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*paxosv1.AcceptedResponse, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

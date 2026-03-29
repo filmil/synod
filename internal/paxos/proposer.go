@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
+// Proposer coordinates the proposal process for the Paxos protocol across the cluster.
 type Proposer struct {
 	agentID  string
 	peers    []PeerClient
@@ -18,6 +19,7 @@ type Proposer struct {
 	nextNum  uint64
 }
 
+// NewProposer constructs a new Proposer.
 func NewProposer(agentID string, peers []PeerClient, acceptor *Acceptor) *Proposer {
 	return &Proposer{
 		agentID:  agentID,
@@ -27,13 +29,17 @@ func NewProposer(agentID string, peers []PeerClient, acceptor *Acceptor) *Propos
 	}
 }
 
+// QuorumType indicates the required level of agreement for a successful proposal.
 type QuorumType int
 
 const (
+	// QuorumMajority requires consensus from >50% of nodes.
 	QuorumMajority QuorumType = iota
+	// QuorumAll requires consensus from 100% of nodes.
 	QuorumAll
 )
 
+// Propose executes the full Paxos protocol (Phase 1 and Phase 2) to establish consensus on a value for a key.
 func (p *Proposer) Propose(ctx context.Context, key string, value []byte, qt QuorumType) ([]byte, error) {
 	p.mu.Lock()
 	proposalID := &paxosv1.ProposalID{

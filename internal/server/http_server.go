@@ -25,16 +25,25 @@ import (
 	"github.com/golang/glog"
 )
 
+// OngoingRequest tracks the state of a User API request initiated via the web dashboard.
 type OngoingRequest struct {
+	// ID is a unique identifier for the request.
 	ID        string
+	// Type indicates the kind of request (e.g., Read, CompareAndWrite).
 	Type      string
+	// Key is the target key path for the request.
 	Key       string
+	// StartTime records when the request was initiated.
 	StartTime time.Time
+	// Result contains the outcome message or value as a string.
 	Result    string
+	// Finished indicates whether the request has completed.
 	Finished  bool
+	// Success indicates if a finished request was successful.
 	Success   bool
 }
 
+// HTTPServer provides a web dashboard for inspecting agent state and issuing commands.
 type HTTPServer struct {
 	store *state.Store
 	cell  *paxos.Cell
@@ -44,6 +53,7 @@ type HTTPServer struct {
 	ongoingRequests []OngoingRequest
 }
 
+// NewHTTPServer initializes a new HTTPServer.
 func NewHTTPServer(addr string, store *state.Store, cell *paxos.Cell) *HTTPServer {
 	return &HTTPServer{
 		addr:            addr,
@@ -79,6 +89,7 @@ func (s *HTTPServer) completeOngoingRequest(id string, success bool, result stri
 	}
 }
 
+// Run starts the HTTP server on the provided listener.
 func (s *HTTPServer) Run(lis net.Listener) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)

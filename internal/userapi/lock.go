@@ -52,6 +52,7 @@ func extractLockPaths(keyPath string) []string {
 	return lockPaths
 }
 
+// AcquireLock attempts to acquire locks for all lockable segments in a key path.
 func (a *UserAPI) AcquireLock(ctx context.Context, req *paxosv1.AcquireLockRequest) (*paxosv1.AcquireLockResponse, error) {
 	lockPaths := extractLockPaths(req.KeyPath)
 	if len(lockPaths) == 0 {
@@ -120,6 +121,7 @@ func (a *UserAPI) acquireSingleLock(ctx context.Context, lockPath, agentID strin
 	return resp.Success, nil
 }
 
+// ReleaseLock releases locks for all lockable segments in a key path that are held by this agent.
 func (a *UserAPI) ReleaseLock(ctx context.Context, req *paxosv1.ReleaseLockRequest) (*paxosv1.ReleaseLockResponse, error) {
 	lockPaths := extractLockPaths(req.KeyPath)
 	if len(lockPaths) == 0 {
@@ -157,6 +159,7 @@ func (a *UserAPI) ReleaseLock(ctx context.Context, req *paxosv1.ReleaseLockReque
 	return &paxosv1.ReleaseLockResponse{Success: true, Message: "Locks released"}, nil
 }
 
+// RenewLock attempts to renew the lease duration for all lockable segments in a key path.
 func (a *UserAPI) RenewLock(ctx context.Context, req *paxosv1.RenewLockRequest) (*paxosv1.RenewLockResponse, error) {
 	lockPaths := extractLockPaths(req.KeyPath)
 	if len(lockPaths) == 0 {
