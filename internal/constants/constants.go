@@ -1,3 +1,4 @@
+// Package constants defines global constants used across the application.
 package constants
 
 const (

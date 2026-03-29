@@ -16,10 +16,13 @@ import (
 
 const schemaVersion = 1
 
+// Store manages the persistence of agent state, including Paxos variables,
+// Key-Value data, cluster membership, and a message log. It is backed by SQLite.
 type Store struct {
 	db *sql.DB
 }
 
+// NewStore initializes a new Store, creating the necessary database files and schema.
 func NewStore(stateDir string) (*Store, error) {
 	if stateDir == "" {
 		return nil, fmt.Errorf("state directory is required")
@@ -119,6 +122,8 @@ func (s *Store) init() error {
 	return nil
 }
 
+// GetAgentID retrieves the persistent agent ID and short name for this node.
+// If they do not exist, a new agent ID is generated and saved.
 func (s *Store) GetAgentID() (string, string, error) {
 	var id, shortName string
 	err := s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'agent_id'").Scan(&id)
@@ -147,6 +152,7 @@ func (s *Store) GetAgentID() (string, string, error) {
 	return id, shortName, nil
 }
 
+// SetShortName updates the human-readable short name for this node.
 func (s *Store) SetShortName(shortName string) error {
 	_, err := s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('short_name', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", shortName)
 	if err != nil {
@@ -155,10 +161,13 @@ func (s *Store) SetShortName(shortName string) error {
 	return nil
 }
 
+// Close closes the underlying database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// GetAcceptorState retrieves the highest promised and accepted proposal IDs, and the
+// accepted value for a given key.
 func (s *Store) GetAcceptorState(key string) (promisedID *paxosv1.ProposalID, acceptedID *paxosv1.ProposalID, acceptedValue []byte, err error) {
 	var pIDNum, aIDNum sql.NullInt64
 	var pIDAgent, aIDAgent sql.NullString
@@ -185,6 +194,7 @@ func (s *Store) GetAcceptorState(key string) (promisedID *paxosv1.ProposalID, ac
 	return promisedID, acceptedID, acceptedValue, nil
 }
 
+// SetPromisedID records a promise not to accept proposals with a lower ID for a given key.
 func (s *Store) SetPromisedID(key string, id *paxosv1.ProposalID) error {
 	_, err := s.db.Exec(`
 		INSERT INTO acceptor_state (key, promised_id_num, promised_id_agent)
@@ -199,6 +209,7 @@ func (s *Store) SetPromisedID(key string, id *paxosv1.ProposalID) error {
 	return nil
 }
 
+// SetAcceptedValue records the acceptance of a proposal for a given key.
 func (s *Store) SetAcceptedValue(key string, id *paxosv1.ProposalID, value []byte) error {
 	_, err := s.db.Exec(`
 		INSERT INTO acceptor_state (key, promised_id_num, promised_id_agent, accepted_id_num, accepted_id_agent, accepted_value)
@@ -216,10 +227,13 @@ func (s *Store) SetAcceptedValue(key string, id *paxosv1.ProposalID, value []byt
 	return nil
 }
 
+// PeerInfo contains metadata about a cluster member.
 type PeerInfo struct {
+	// ShortName is the human-readable name of the peer.
 	ShortName string `json:"short_name"`
 }
 
+// AddMember adds or updates a peer in the local membership list.
 func (s *Store) AddMember(agentID string, info PeerInfo) error {
 	b, err := json.Marshal(info)
 	if err != nil {
@@ -235,6 +249,7 @@ func (s *Store) AddMember(agentID string, info PeerInfo) error {
 	return nil
 }
 
+// RemoveMember removes a peer from the local membership list.
 func (s *Store) RemoveMember(agentID string) error {
 	_, err := s.db.Exec("DELETE FROM membership WHERE agent_id = ?", agentID)
 	if err != nil {
@@ -243,6 +258,7 @@ func (s *Store) RemoveMember(agentID string) error {
 	return nil
 }
 
+// GetMembers retrieves the entire local membership list.
 func (s *Store) GetMembers() (map[string]PeerInfo, error) {
 	rows, err := s.db.Query("SELECT agent_id, address FROM membership")
 	if err != nil {
@@ -266,6 +282,8 @@ func (s *Store) GetMembers() (map[string]PeerInfo, error) {
 	return members, nil
 }
 
+// CommitKV saves a value to the Key-Value store after consensus is reached.
+// If the value is empty, the entry is marked as deleted.
 func (s *Store) CommitKV(key string, value []byte, valType string, version uint64) error {
 	deleted := len(value) == 0
 	_, err := s.db.Exec(`
@@ -282,6 +300,7 @@ func (s *Store) CommitKV(key string, value []byte, valType string, version uint6
 	return nil
 }
 
+// GetKVState returns a map of all keys and their corresponding consensus version numbers.
 func (s *Store) GetKVState() (map[string]uint64, error) {
 	rows, err := s.db.Query("SELECT key, version FROM kv_store")
 	if err != nil {
@@ -305,6 +324,7 @@ func (s *Store) GetKVState() (map[string]uint64, error) {
 	return keys, nil
 }
 
+// GetKVEntry retrieves the value, type, version, and deletion status of a specific key.
 func (s *Store) GetKVEntry(key string) (value []byte, valType string, version uint64, deleted bool, err error) {
 	var pn sql.NullInt64
 	err = s.db.QueryRow("SELECT value, type, version, deleted FROM kv_store WHERE key = ?", key).Scan(&value, &valType, &pn, &deleted)
@@ -317,14 +337,21 @@ func (s *Store) GetKVEntry(key string) (value []byte, valType string, version ui
 	return value, valType, version, deleted, err
 }
 
+// KVEntry represents a single entry in the Key-Value store.
 type KVEntry struct {
+	// Key is the unique identifier for the entry.
 	Key     string
+	// Value is the raw byte content of the entry.
 	Value   []byte
+	// Type classifies the entry (e.g., "data", "membership").
 	Type    string
+	// Version is the consensus sequence number for this specific update.
 	Version uint64
+	// Deleted indicates whether this entry is marked as deleted.
 	Deleted bool
 }
 
+// GetAllKVs retrieves all non-deleted entries from the Key-Value store.
 func (s *Store) GetAllKVs() ([]KVEntry, error) {
 	rows, err := s.db.Query("SELECT key, value, type, version, deleted FROM kv_store WHERE deleted = FALSE ORDER BY key")
 	if err != nil {
@@ -347,6 +374,7 @@ func (s *Store) GetAllKVs() ([]KVEntry, error) {
 	return entries, nil
 }
 
+// LogMessage records an incoming or outgoing message and its reply to the database.
 func (s *Store) LogMessage(msgType, sender, receiver string, message, reply []byte) error {
 	_, err := s.db.Exec(`
 		INSERT INTO message_log (type, sender, receiver, message, reply)
@@ -358,16 +386,25 @@ func (s *Store) LogMessage(msgType, sender, receiver string, message, reply []by
 	return nil
 }
 
+// LogEntry represents a single recorded message exchange.
 type LogEntry struct {
+	// ID is the sequential identifier for the log entry.
 	ID        int64
+	// Timestamp is the time the message was recorded.
 	Timestamp string
+	// Type classifies the message (e.g., Prepare, Accept).
 	Type      string
+	// Sender is the agent ID that initiated the message.
 	Sender    string
+	// Receiver is the agent ID that received the message.
 	Receiver  string
+	// Message contains a text representation of the request.
 	Message   string
+	// Reply contains a text representation of the response.
 	Reply     string
 }
 
+// GetRecentMessages retrieves the most recent message log entries up to the specified limit.
 func (s *Store) GetRecentMessages(limit int) ([]LogEntry, error) {
 	rows, err := s.db.Query(`
 		SELECT id, timestamp, type, sender, receiver, message, reply 

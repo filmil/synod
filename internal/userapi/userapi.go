@@ -12,10 +12,12 @@ import (
 	"github.com/golang/glog"
 )
 
+// UserAPI provides client-facing operations for interacting with the Key-Value store.
 type UserAPI struct {
 	cell *paxos.Cell
 }
 
+// New creates a new UserAPI instance backed by the given Paxos cell.
 func New(cell *paxos.Cell) *UserAPI {
 	return &UserAPI{cell: cell}
 }

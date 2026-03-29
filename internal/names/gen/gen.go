@@ -1,3 +1,4 @@
+// Package main is an executable that generates the names list used by the names package.
 package main
 
 import (
