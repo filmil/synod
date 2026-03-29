@@ -22,6 +22,7 @@ go_library(
 
 go_test(
     name = "paxos_test",
+    size = "small",
     srcs = [
         "acceptor_test.go",
         "cell_test.go",

@@ -12,6 +12,7 @@ go_library(
 
 go_test(
     name = "names_test",
+    size = "small",
     srcs = ["names_test.go"],
     embed = [":names"],
 )
