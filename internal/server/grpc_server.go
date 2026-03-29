@@ -11,6 +11,7 @@ import (
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/channelz/service"
 )
 
 type PaxosServer struct {
@@ -159,6 +160,7 @@ func RunGRPCServer(ctx context.Context, lis net.Listener, srv *PaxosServer) erro
 
 	paxosv1.RegisterPaxosServiceServer(s, srv)
 	paxosv1.RegisterUserServiceServer(s, srv)
+	service.RegisterChannelzServiceToServer(s)
 
 	go func() {
 		<-ctx.Done()

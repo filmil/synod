@@ -86,6 +86,7 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	mux.HandleFunc("/peers", s.handlePeers)
 	mux.HandleFunc("/store", s.handleStore)
 	mux.HandleFunc("/system", s.handleSystem)
+	mux.HandleFunc("/grpc", s.handleGRPC)
 	mux.HandleFunc("/api/command", s.handleCommand)
 	mux.HandleFunc("/userapi", s.handleUserAPI)
 	mux.HandleFunc("/api/user/read", s.handleUserAPIRead)
@@ -149,6 +150,7 @@ func (s *HTTPServer) renderHeader(w http.ResponseWriter, title, agentName, activ
             <li class="nav-item"><a class="nav-link %s" href="/peers">Peers</a></li>
             <li class="nav-item"><a class="nav-link %s" href="/userapi">User API</a></li>
             <li class="nav-item"><a class="nav-link %s" href="/system">System</a></li>
+            <li class="nav-item"><a class="nav-link %s" href="/grpc">gRPC Status</a></li>
           </ul>
           <div class="dropdown">
             <button class="btn btn-outline-light dropdown-toggle btn-sm" type="button" id="reloadDropdown" data-bs-toggle="dropdown" aria-expanded="false">
@@ -177,7 +179,8 @@ func (s *HTTPServer) renderHeader(w http.ResponseWriter, title, agentName, activ
 		s.activeClass(activeNav, "messages"),
 		s.activeClass(activeNav, "peers"),
 		s.activeClass(activeNav, "userapi"),
-		s.activeClass(activeNav, "system"))
+		s.activeClass(activeNav, "system"),
+		s.activeClass(activeNav, "grpc"))
 }
 
 func (s *HTTPServer) activeClass(active, current string) string {
