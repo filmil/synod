@@ -345,7 +345,14 @@ func main() {
 		}
 	}()
 
-	glog.Infof("Synod agent is up and running")
+	glog.Infof("\n\nSynod agent is up and running\n" +
+		"--------------------------------------------------\n" +
+		"Agent ID:   %s\n" +
+		"Short Name: %s\n" +
+		"gRPC Addr:  %s\n" +
+		"HTTP URL:   http://%s\n" +
+		"--------------------------------------------------\n",
+		agentID, shortName, finalGrpcAddr, httpLis.Addr().String())
 
 	select {
 	case err := <-errChan:
