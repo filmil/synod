@@ -20,6 +20,29 @@ import (
 
 const schemaVersion = 1
 
+// ValidateKey ensures the provided key is a valid absolute Unix path.
+// It does not support '.' or '..' segments.
+func ValidateKey(key string) error {
+	if !strings.HasPrefix(key, "/") {
+		return fmt.Errorf("key must be an absolute path (starting with /): %s", key)
+	}
+	parts := strings.Split(key, "/")
+	for _, part := range parts {
+		if part == "." || part == ".." {
+			return fmt.Errorf("key cannot contain '.' or '..' segments: %s", key)
+		}
+	}
+	// Also ensure no double slashes, though Split handles them as empty strings
+	// If we want to be strict about no empty segments (other than the first one)
+	for i, part := range parts {
+		if i > 0 && part == "" && i < len(parts)-1 {
+			// This would catch /foo//bar
+			return fmt.Errorf("key cannot contain empty segments: %s", key)
+		}
+	}
+	return nil
+}
+
 // Store manages the persistence of agent state, including Paxos variables,
 // Key-Value data, cluster membership, and a message log. It is backed by SQLite.
 type Store struct {
@@ -305,6 +328,9 @@ func (s *Store) Close() error {
 // GetAcceptorState retrieves the highest promised and accepted proposal IDs, and the
 // accepted value for a given key.
 func (s *Store) GetAcceptorState(key string) (promisedID *paxosv1.ProposalID, acceptedID *paxosv1.ProposalID, acceptedValue []byte, err error) {
+	if err := ValidateKey(key); err != nil {
+		return nil, nil, nil, err
+	}
 	if strings.HasPrefix(key, "/_internal") {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
@@ -341,6 +367,9 @@ func (s *Store) GetAcceptorState(key string) (promisedID *paxosv1.ProposalID, ac
 
 // SetPromisedID records a promise not to accept proposals with a lower ID for a given key.
 func (s *Store) SetPromisedID(key string, id *paxosv1.ProposalID) error {
+	if err := ValidateKey(key); err != nil {
+		return err
+	}
 	if strings.HasPrefix(key, "/_internal") {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -365,6 +394,9 @@ func (s *Store) SetPromisedID(key string, id *paxosv1.ProposalID) error {
 
 // SetAcceptedValue records the acceptance of a proposal for a given key.
 func (s *Store) SetAcceptedValue(key string, id *paxosv1.ProposalID, value []byte) error {
+	if err := ValidateKey(key); err != nil {
+		return err
+	}
 	if strings.HasPrefix(key, "/_internal") {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -464,6 +496,9 @@ func (s *Store) GetMembers() (map[string]PeerInfo, error) {
 // CommitKV saves a value to the Key-Value store after consensus is reached.
 // If the value is empty, the entry is marked as deleted.
 func (s *Store) CommitKV(key string, value []byte, valType string, version uint64) error {
+	if err := ValidateKey(key); err != nil {
+		return err
+	}
 	deleted := len(value) == 0
 	if strings.HasPrefix(key, "/_internal") {
 		s.mu.Lock()
@@ -526,6 +561,9 @@ func (s *Store) GetKVState() (map[string]uint64, error) {
 
 // GetKVEntry retrieves the value, type, version, and deletion status of a specific key.
 func (s *Store) GetKVEntry(key string) (value []byte, valType string, version uint64, deleted bool, err error) {
+	if err := ValidateKey(key); err != nil {
+		return nil, "", 0, false, err
+	}
 	if strings.HasPrefix(key, "/_internal") {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
@@ -589,6 +627,69 @@ func (s *Store) GetAllKVs() ([]KVEntry, error) {
 		}
 	}
 	s.mu.RUnlock()
+
+	// Sort the merged entries by key
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Key < entries[j].Key
+	})
+
+	return entries, nil
+}
+
+// GetKVsByPrefix retrieves all non-deleted entries from the Key-Value store
+// that start with the specified prefix.
+func (s *Store) GetKVsByPrefix(prefix string) ([]KVEntry, error) {
+	if err := ValidateKey(prefix); err != nil {
+		return nil, err
+	}
+
+	// Calculate the end range for the prefix to allow efficient SQLite indexing.
+	// E.g. prefix "/foo" -> range ["/foo", "/fop")
+	prefixEnd := prefix[:len(prefix)-1] + string(prefix[len(prefix)-1]+1)
+
+	rows, err := s.db.Query(`
+		SELECT key, value, type, version, deleted 
+		FROM kv_store 
+		WHERE key >= ? AND key < ? AND deleted = FALSE 
+		ORDER BY key`, prefix, prefixEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []KVEntry
+	for rows.Next() {
+		var e KVEntry
+		var pn sql.NullInt64
+		if err := rows.Scan(&e.Key, &e.Value, &e.Type, &pn, &e.Deleted); err != nil {
+			return nil, err
+		}
+		if pn.Valid {
+			e.Version = uint64(pn.Int64)
+		}
+		entries = append(entries, e)
+	}
+
+	// Add in-memory internal KVs that match the prefix
+	if strings.HasPrefix("/_internal", prefix) || strings.HasPrefix(prefix, "/_internal") {
+		s.mu.RLock()
+		for k, e := range s.internalKVs {
+			if strings.HasPrefix(k, prefix) && !e.Deleted {
+				// Avoid duplicates if also in DB (though internal shouldn't be)
+				found := false
+				for _, existing := range entries {
+					if existing.Key == k {
+						found = true
+						break
+					}
+				}
+				if !found {
+					entries = append(entries, e)
+				}
+			}
+		}
+		s.mu.RUnlock()
+	}
 
 	// Sort the merged entries by key
 	sort.Slice(entries, func(i, j int) bool {

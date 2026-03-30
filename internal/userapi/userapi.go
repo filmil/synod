@@ -8,6 +8,7 @@ import (
 
 	"github.com/filmil/synod/internal/backoff"
 	"github.com/filmil/synod/internal/paxos"
+	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 )
@@ -158,4 +159,31 @@ func (a *UserAPI) Shutdown(ctx context.Context, req *paxosv1.ShutdownRequest) (*
 	}()
 
 	return &paxosv1.ShutdownResponse{Success: true, Message: "Shutdown initiated. Entering lame duck mode."}, nil
+}
+
+// ReadPrefix returns all non-deleted Key-Value entries matching the specified prefix.
+func (a *UserAPI) ReadPrefix(ctx context.Context, prefix string) (*paxosv1.ReadPrefixResponse, error) {
+	if err := state.ValidateKey(prefix); err != nil {
+		return nil, err
+	}
+
+	entries, err := a.cell.GetStore().GetKVsByPrefix(prefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read prefix %s: %w", prefix, err)
+	}
+
+	resp := &paxosv1.ReadPrefixResponse{
+		Entries: make([]*paxosv1.ReadResponse, 0, len(entries)),
+	}
+
+	for _, e := range entries {
+		resp.Entries = append(resp.Entries, &paxosv1.ReadResponse{
+			Key:     e.Key,
+			Value:   e.Value,
+			Type:    e.Type,
+			Version: e.Version,
+		})
+	}
+
+	return resp, nil
 }

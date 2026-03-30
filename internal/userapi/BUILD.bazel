@@ -12,6 +12,7 @@ go_library(
         "//internal/backoff",
         "//internal/constants",
         "//internal/paxos",
+        "//internal/state",
         "//proto/paxos/v1:paxosv1_go_proto",
         "@com_github_golang_glog//:glog",
     ],

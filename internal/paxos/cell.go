@@ -277,6 +277,9 @@ func (c *Cell) SetPeers(peers []PeerClient) {
 // Propose attempts to reach consensus on updating a key with a new value using the
 // specified quorum constraint. It automatically retries on concurrent modification errors.
 func (c *Cell) Propose(ctx context.Context, key string, value []byte, qt QuorumType) error {
+	if err := state.ValidateKey(key); err != nil {
+		return err
+	}
 	bo := backoff.New()
 	bo.MaxElapsedTime = 2 * time.Minute
 

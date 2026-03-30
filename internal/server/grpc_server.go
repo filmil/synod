@@ -344,6 +344,36 @@ func (s *PaxosServer) CompareAndWrite(ctx context.Context, req *paxosv1.CompareA
 	return resp, nil
 }
 
+// ReadPrefix handles a client request to read all entries with a specified prefix.
+func (s *PaxosServer) ReadPrefix(ctx context.Context, req *paxosv1.ReadPrefixRequest) (*paxosv1.ReadPrefixResponse, error) {
+	if req.Auth != nil {
+		if cert, err := identity.UnmarshalCertificate(req.Auth.Certificate); err == nil {
+			if err := identity.VerifyMessage(cert, req, req.Auth.Signature); err != nil {
+				glog.Warningf("gRPC: ReadPrefix for %s: signature verification failed: %v", req.Prefix, err)
+			} else {
+				glog.V(2).Infof("gRPC: ReadPrefix for %s: signature verified", req.Prefix)
+			}
+		}
+	}
+
+	resp, err := s.userAPI.ReadPrefix(ctx, req.Prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.ident != nil {
+		sig, cert, err := s.ident.SignMessage(resp)
+		if err == nil {
+			resp.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
+		}
+	}
+
+	return resp, nil
+}
+
 
 // AcquireLock handles a client request to acquire a distributed lock.
 func (s *PaxosServer) AcquireLock(ctx context.Context, req *paxosv1.AcquireLockRequest) (*paxosv1.AcquireLockResponse, error) {
