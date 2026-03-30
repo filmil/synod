@@ -214,6 +214,43 @@ const (
     {{end}}
   </tbody>
 </table>`
+
+	ongoingRequestsTmpl = `
+<div class="card shadow-sm mb-4">
+  <div class="card-header bg-dark text-white">Recently Executed / Ongoing Requests</div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover">
+        <thead><tr><th>Time</th><th>Type</th><th>Key</th><th>Status</th><th>Result</th></tr></thead>
+        <tbody>
+          {{range .}}
+          <tr>
+            <td>{{.Time}}</td>
+            <td>{{.Type}}</td>
+            <td><code>{{.Key}}</code></td>
+            <td>{{.StatusHTML}}</td>
+            <td><small>{{.Result}}</small></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>`
+
+	prefixResultsTmpl = `
+<div class="table-responsive">
+  <table class="table table-sm table-bordered bg-white mt-2 mb-0" style="font-size: 0.85em;">
+    <thead><tr><th>Key</th><th>Value</th></tr></thead>
+    <tbody>
+      {{range .}}
+      <tr><td><code>{{.Key}}</code></td><td>{{.Value}}</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>`
+
+	fallbackPlainTmpl = `<pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>{{.}}</code></pre>`
 )
 
 // HTTPServer provides a web dashboard for inspecting agent state and issuing commands.
@@ -274,6 +311,7 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	mux.HandleFunc("/api/command", s.handleCommand)
 	mux.HandleFunc("/userapi", s.handleUserAPI)
 	mux.HandleFunc("/api/user/read", s.handleUserAPIRead)
+	mux.HandleFunc("/api/user/readprefix", s.handleUserAPIReadPrefix)
 	mux.HandleFunc("/api/user/write", s.handleUserAPIWrite)
 	mux.HandleFunc("/api/user/lock/acquire", s.handleUserAPILockAcquire)
 	mux.HandleFunc("/api/user/lock/release", s.handleUserAPILockRelease)
@@ -674,14 +712,14 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 
 	ongoingHTML := ""
 	if len(ongoing) > 0 {
-		ongoingHTML = `
-		<div class="card shadow-sm mb-4">
-			<div class="card-header bg-dark text-white">Recently Executed / Ongoing Requests</div>
-			<div class="card-body">
-				<div class="table-responsive">
-					<table class="table table-sm table-hover">
-						<thead><tr><th>Time</th><th>Type</th><th>Key</th><th>Status</th><th>Result</th></tr></thead>
-						<tbody>`
+		type renderEntry struct {
+			Time       string
+			Type       string
+			Key        string
+			StatusHTML template.HTML
+			Result     string
+		}
+		var entries []renderEntry
 		for _, r := range ongoing {
 			status := "<span class=\"badge bg-secondary\">Ongoing...</span>"
 			if r.Finished {
@@ -695,10 +733,18 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 			if len(resultText) > 100 {
 				resultText = resultText[:97] + "..."
 			}
-			ongoingHTML += fmt.Sprintf("<tr><td>%s</td><td>%s</td><td><code>%s</code></td><td>%s</td><td><small>%s</small></td></tr>",
-				r.StartTime.Format("15:04:05"), r.Type, html.EscapeString(r.Key), status, html.EscapeString(resultText))
+			entries = append(entries, renderEntry{
+				Time:       r.StartTime.Format("15:04:05"),
+				Type:       r.Type,
+				Key:        r.Key,
+				StatusHTML: template.HTML(status),
+				Result:     resultText,
+			})
 		}
-		ongoingHTML += "</tbody></table></div></div></div>"
+		var sb strings.Builder
+		t := template.Must(template.New("ongoing").Parse(ongoingRequestsTmpl))
+		t.Execute(&sb, entries)
+		ongoingHTML = sb.String()
 	}
 	data.OngoingHTML = template.HTML(ongoingHTML)
 
@@ -710,6 +756,8 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 		statusMsg = fmt.Sprintf(`<div class="alert alert-danger mb-4" role="alert">Operation failed: %s</div>`, html.EscapeString(errMsg))
 	} else if resultMsg := r.URL.Query().Get("result"); resultMsg != "" {
 		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert">Read Result: <code>%s</code></div>`, html.EscapeString(resultMsg))
+	} else if prefixResult := r.URL.Query().Get("prefix_result"); prefixResult != "" {
+		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert"><h6 class="alert-heading">Prefix Read Result:</h6>%s</div>`, prefixResult)
 	}
 	data.StatusMsg = template.HTML(statusMsg)
 
@@ -763,6 +811,54 @@ func (s *HTTPServer) handleUserAPIRead(w http.ResponseWriter, r *http.Request) {
 	resStr := string(resp.Value)
 	s.completeOngoingRequest(reqID, true, resStr)
 	http.Redirect(w, r, "/userapi?result="+url.QueryEscape(resStr), http.StatusSeeOther)
+}
+
+func (s *HTTPServer) handleUserAPIReadPrefix(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
+		return
+	}
+
+	prefix := r.FormValue("prefix")
+	reqID := s.addOngoingRequest("ReadPrefix", prefix)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	userAPI := userapi.New(s.cell)
+	resp, err := userAPI.ReadPrefix(ctx, prefix)
+
+	if err != nil {
+		s.completeOngoingRequest(reqID, false, err.Error())
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+
+	if len(resp.Entries) == 0 {
+		s.completeOngoingRequest(reqID, true, "no keys found")
+		http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape("<em>No keys found with this prefix.</em>"), http.StatusSeeOther)
+		return
+	}
+
+	// Format results as a small table
+	type entry struct {
+		Key   string
+		Value string
+	}
+	var resEntries []entry
+	for _, e := range resp.Entries {
+		resEntries = append(resEntries, entry{
+			Key:   e.Key,
+			Value: string(e.Value),
+		})
+	}
+
+	var sb strings.Builder
+	t := template.Must(template.New("prefixRes").Parse(prefixResultsTmpl))
+	t.Execute(&sb, resEntries)
+
+	s.completeOngoingRequest(reqID, true, fmt.Sprintf("found %d entries", len(resp.Entries)))
+	http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape(sb.String()), http.StatusSeeOther)
 }
 
 func (s *HTTPServer) handleUserAPIWrite(w http.ResponseWriter, r *http.Request) {
@@ -906,7 +1002,10 @@ func maybeJSONToTable(data []byte) string {
 	var obj interface{}
 	if err := json.Unmarshal(data, &obj); err != nil {
 		glog.V(2).Infof("maybeJSONToTable: Not JSON, returning as plain text")
-		return fmt.Sprintf(`<pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>%s</code></pre>`, html.EscapeString(string(data)))
+		var sb strings.Builder
+		t := template.Must(template.New("plain").Parse(fallbackPlainTmpl))
+		t.Execute(&sb, string(data))
+		return sb.String()
 	}
 
 	return renderJSONNode(obj, "")

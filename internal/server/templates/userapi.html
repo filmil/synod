@@ -69,6 +69,20 @@
               </form>
             </div>
           </div>
+
+          <div class="card shadow-sm mb-4">
+            <div class="card-header bg-info text-white">Read Prefix</div>
+            <div class="card-body">
+              <form action="/api/user/readprefix" method="post">
+                <div class="mb-3">
+                  <label class="form-label">Path Prefix</label>
+                  <input type="text" name="prefix" class="form-control" placeholder="/foo" required>
+                </div>
+                <p class="small text-muted">Retrieves all non-deleted keys starting with this prefix (Local only).</p>
+                <button type="submit" class="btn btn-info">Execute ReadPrefix</button>
+              </form>
+            </div>
+          </div>
         </div>
 
         <div class="col-md-4">
