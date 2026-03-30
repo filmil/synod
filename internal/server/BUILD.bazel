@@ -16,6 +16,7 @@ go_library(
     deps = [
         "//internal/backoff",
         "//internal/constants",
+        "//internal/identity",
         "//internal/paxos",
         "//internal/state",
         "//internal/userapi",

@@ -53,6 +53,13 @@
               <p class="card-text"><strong>ID:</strong> <small class="text-muted">{{.AgentID}}</small></p>
               <p class="card-text"><strong>Name:</strong> {{.AgentName}}</p>
               <p class="card-text"><strong>Keys Count:</strong> {{.KeysCount}}</p>
+              <hr>
+              <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#agentCert" aria-expanded="false">
+                View Certificate
+              </button>
+              <div class="collapse mt-2" id="agentCert">
+                <pre class="x-small border p-2 bg-white text-muted" style="font-size: 0.7rem; max-height: 200px; overflow-y: auto;">{{.AgentCert}}</pre>
+              </div>
             </div>
           </div>
         </div>

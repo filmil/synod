@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/filmil/synod/internal/identity"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 // Proposer coordinates the proposal process for the Paxos protocol across the cluster.
 type Proposer struct {
 	agentID  string
+	ident    *identity.Identity
 	peers    []PeerClient
 	acceptor *Acceptor
 	mu       sync.Mutex
@@ -20,9 +22,10 @@ type Proposer struct {
 }
 
 // NewProposer constructs a new Proposer.
-func NewProposer(agentID string, peers []PeerClient, acceptor *Acceptor) *Proposer {
+func NewProposer(agentID string, ident *identity.Identity, peers []PeerClient, acceptor *Acceptor) *Proposer {
 	return &Proposer{
 		agentID:  agentID,
+		ident:    ident,
 		peers:    peers,
 		acceptor: acceptor,
 		nextNum:  1,
@@ -154,6 +157,16 @@ func (p *Proposer) sendPrepare(ctx context.Context, key string, id *paxosv1.Prop
 		Nonce:      nonce,
 	}
 
+	if p.ident != nil {
+		sig, cert, err := p.ident.SignMessage(req)
+		if err == nil {
+			req.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
+		}
+	}
+
 	// Prepare self
 	resp, err := p.acceptor.Prepare(ctx, req)
 	if err == nil && resp != nil {
@@ -200,6 +213,16 @@ func (p *Proposer) sendAccept(ctx context.Context, key string, id *paxosv1.Propo
 		Key:        key,
 		Value:      value,
 		Nonce:      nonce,
+	}
+
+	if p.ident != nil {
+		sig, cert, err := p.ident.SignMessage(req)
+		if err == nil {
+			req.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
+		}
 	}
 
 	// Accept self

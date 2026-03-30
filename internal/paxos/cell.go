@@ -13,6 +13,7 @@ import (
 	"github.com/filmil/synod/internal/constants"
 
 	"github.com/filmil/synod/internal/backoff"
+	"github.com/filmil/synod/internal/identity"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
@@ -67,6 +68,7 @@ type ConnectionInfo struct {
 type Cell struct {
 	agentID  string
 	store    *state.Store
+	ident    *identity.Identity
 	acceptor *Acceptor
 	proposer *Proposer
 
@@ -86,17 +88,18 @@ type Cell struct {
 	missedEndpointCount map[string]int
 }
 
-func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory PeerFactory, selfGRPCAddr, selfHTTPURL string) *Cell {
+func NewCell(agentID string, store *state.Store, ident *identity.Identity, acceptor *Acceptor, factory PeerFactory, selfGRPCAddr, selfHTTPURL string) *Cell {
 	c := &Cell{
 		agentID:             agentID,
 		store:               store,
+		ident:               ident,
 		acceptor:            acceptor,
 		peers:               make(map[string]PeerClient),
 		peerFactory:         factory,
 		selfGRPCAddr:        selfGRPCAddr,
 		selfHTTPURL:         selfHTTPURL,
 		ShutdownChan:        make(chan struct{}),
-		proposer:            NewProposer(agentID, []PeerClient{}, acceptor),
+		proposer:            NewProposer(agentID, ident, []PeerClient{}, acceptor),
 		missedEndpointCount: make(map[string]int),
 	}
 	c.acceptor.SetValidator(c.validateAccept)
@@ -168,12 +171,24 @@ func (c *Cell) pingNode(ctx context.Context, id string, info state.PeerInfo) err
 	pingCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 	defer cancel()
 	nonce := uuid.New().String()
-	_, err := client.Ping(pingCtx, &paxosv1.PingRequest{
+	req := &paxosv1.PingRequest{
 		AgentId:  c.agentID,
 		Nonce:    nonce,
 		HostPort: c.selfGRPCAddr,
 		HttpUrl:  c.selfHTTPURL,
-	})
+	}
+
+	if c.ident != nil {
+		sig, cert, err := c.ident.SignMessage(req)
+		if err == nil {
+			req.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
+		}
+	}
+
+	_, err := client.Ping(pingCtx, req)
 	return err
 }
 
@@ -256,7 +271,7 @@ func (c *Cell) SetPeers(peers []PeerClient) {
 	for _, p := range peers {
 		c.peers[p.AgentID()] = p
 	}
-	c.proposer = NewProposer(c.agentID, peers, c.acceptor)
+	c.proposer = NewProposer(c.agentID, c.ident, peers, c.acceptor)
 }
 
 // Propose attempts to reach consensus on updating a key with a new value using the
@@ -321,7 +336,7 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 		}
 
 		// Check if already correct
-		if existing, ok := peers[agentID]; ok && existing == info {
+		if existing, ok := peers[agentID]; ok && existing.Equal(info) {
 			glog.V(2).Infof("Cell(%s): Membership for %s is already correct", c.agentID, agentID)
 			return nil
 		}
@@ -498,7 +513,7 @@ func (c *Cell) refreshPeers(ctx context.Context) {
 	}
 
 	c.peers = newPeers
-	c.proposer = NewProposer(c.agentID, peerList, c.acceptor)
+	c.proposer = NewProposer(c.agentID, c.ident, peerList, c.acceptor)
 }
 
 // StartSyncLoop periodically triggers synchronization of state with all active peers.
@@ -549,12 +564,24 @@ func (c *Cell) PingPeers(ctx context.Context) {
 		nonce := uuid.New().String()
 		pingCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 		glog.V(3).Infof("Cell(%s): Pinging peer %s", c.agentID, p.AgentID())
-		resp, err := p.Ping(pingCtx, &paxosv1.PingRequest{
+		req := &paxosv1.PingRequest{
 			AgentId:  c.agentID,
 			Nonce:    nonce,
 			HostPort: c.selfGRPCAddr,
 			HttpUrl:  c.selfHTTPURL,
-		})
+		}
+
+		if c.ident != nil {
+			sig, cert, err := c.ident.SignMessage(req)
+			if err == nil {
+				req.Auth = &paxosv1.Authentication{
+					Signature:   sig,
+					Certificate: cert,
+				}
+			}
+		}
+
+		resp, err := p.Ping(pingCtx, req)
 		cancel()
 		if err != nil {
 			glog.Warningf("Cell(%s): Peer %s is not responding: %v. Proposing removal.", c.agentID, p.AgentID(), err)
@@ -596,11 +623,23 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 	}
 
 	for _, p := range peers {
-		resp, err := p.Sync(ctx, &paxosv1.SyncRequest{
+		req := &paxosv1.SyncRequest{
 			AgentId:  c.agentID,
 			HostPort: c.selfGRPCAddr,
 			HttpUrl:  c.selfHTTPURL,
-		})
+		}
+
+		if c.ident != nil {
+			sig, cert, err := c.ident.SignMessage(req)
+			if err == nil {
+				req.Auth = &paxosv1.Authentication{
+					Signature:   sig,
+					Certificate: cert,
+				}
+			}
+		}
+
+		resp, err := p.Sync(ctx, req)
 		if err != nil {
 			continue
 		}
@@ -625,7 +664,19 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 
 // CatchUp fetches the latest value of a specific key from a peer and applies it locally.
 func (c *Cell) CatchUp(ctx context.Context, p PeerClient, key string) {
-	resp, err := p.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: key})
+	req := &paxosv1.GetKVEntryRequest{Key: key}
+
+	if c.ident != nil {
+		sig, cert, err := c.ident.SignMessage(req)
+		if err == nil {
+			req.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
+		}
+	}
+
+	resp, err := p.GetKVEntry(ctx, req)
 	if err != nil {
 		glog.Errorf("Cell(%s): Failed to get KV entry %s from %s: %v", c.agentID, key, p.AgentID(), err)
 		return
@@ -732,9 +783,21 @@ func (c *Cell) syncMissingEndpoints(ctx context.Context) {
 		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		resp, err := targetPeer.GetPeerEndpoints(reqCtx, &paxosv1.GetPeerEndpointsRequest{
+		req := &paxosv1.GetPeerEndpointsRequest{
 			AgentId: c.agentID,
-		})
+		}
+
+		if c.ident != nil {
+			sig, cert, err := c.ident.SignMessage(req)
+			if err == nil {
+				req.Auth = &paxosv1.Authentication{
+					Signature:   sig,
+					Certificate: cert,
+				}
+			}
+		}
+
+		resp, err := targetPeer.GetPeerEndpoints(reqCtx, req)
 
 		if err != nil {
 			return fmt.Errorf("failed to get endpoints from %s: %w", targetPeer.AgentID(), err)

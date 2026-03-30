@@ -67,7 +67,7 @@ func (a *UserAPI) AcquireLock(ctx context.Context, req *paxosv1.AcquireLockReque
 		}
 	}
 
-	agentID, _, _ := a.cell.GetStore().GetAgentID()
+	agentID, _ := a.cell.GetStore().GetAgentID()
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 
 	// Acquire locks sequentially
@@ -129,7 +129,7 @@ func (a *UserAPI) ReleaseLock(ctx context.Context, req *paxosv1.ReleaseLockReque
 			lockPaths = []string{req.KeyPath}
 		}
 	}
-	agentID, _, _ := a.cell.GetStore().GetAgentID()
+	agentID, _ := a.cell.GetStore().GetAgentID()
 
 	for i := len(lockPaths) - 1; i >= 0; i-- {
 		lockPath := lockPaths[i]
@@ -167,7 +167,7 @@ func (a *UserAPI) RenewLock(ctx context.Context, req *paxosv1.RenewLockRequest) 
 			lockPaths = []string{req.KeyPath}
 		}
 	}
-	agentID, _, _ := a.cell.GetStore().GetAgentID()
+	agentID, _ := a.cell.GetStore().GetAgentID()
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 
 	now := time.Now().UnixNano()
@@ -215,7 +215,7 @@ func (a *UserAPI) CheckLocks(ctx context.Context, keyPath string) error {
 		return nil
 	}
 
-	agentID, _, _ := a.cell.GetStore().GetAgentID()
+	agentID, _ := a.cell.GetStore().GetAgentID()
 	now := time.Now().UnixNano()
 
 	for _, lockPath := range lockPaths {

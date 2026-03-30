@@ -96,7 +96,7 @@ func TestProposer_Success(t *testing.T) {
 	defer store.Close()
 
 	agentID := "proposer-agent"
-	acceptor := NewAcceptor(agentID, store)
+	acceptor := NewAcceptor(agentID, nil, store)
 
 	// Setup 2 mock peers to make a total of 3 agents (quorum = 2)
 	peers := []PeerClient{
@@ -112,7 +112,7 @@ func TestProposer_Success(t *testing.T) {
 		},
 	}
 
-	p := NewProposer(agentID, peers, acceptor)
+	p := NewProposer(agentID, nil, peers, acceptor)
 	ctx := context.Background()
 
 	_, err = p.Propose(ctx, "/test/key", []byte("consensus-value"), QuorumMajority)
@@ -134,7 +134,7 @@ func TestProposer_NoQuorum(t *testing.T) {
 	defer store.Close()
 
 	agentID := "proposer-agent"
-	acceptor := NewAcceptor(agentID, store)
+	acceptor := NewAcceptor(agentID, nil, store)
 
 	// Peers return failure or no promise
 	peers := []PeerClient{
@@ -148,7 +148,7 @@ func TestProposer_NoQuorum(t *testing.T) {
 		},
 	}
 
-	p := NewProposer(agentID, peers, acceptor)
+	p := NewProposer(agentID, nil, peers, acceptor)
 	ctx := context.Background()
 
 	_, err = p.Propose(ctx, "/test/key", []byte("val"), QuorumMajority)
@@ -170,7 +170,7 @@ func TestProposer_FastForwardNextNum(t *testing.T) {
 	defer store.Close()
 
 	agentID := "proposer-agent"
-	acceptor := NewAcceptor(agentID, store)
+	acceptor := NewAcceptor(agentID, nil, store)
 
 	// Peers reject with a higher Promised ID
 	peers := []PeerClient{
@@ -198,7 +198,7 @@ func TestProposer_FastForwardNextNum(t *testing.T) {
 		},
 	}
 
-	p := NewProposer(agentID, peers, acceptor)
+	p := NewProposer(agentID, nil, peers, acceptor)
 	ctx := context.Background()
 
 	// Initial nextNum is 1

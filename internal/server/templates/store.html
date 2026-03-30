@@ -59,12 +59,21 @@
                 </tr>
               </thead>
               <tbody>
-                {{range .KVs}}
+                {{range $index, $kv := .KVs}}
                 <tr>
-                  <td><code>{{.Key}}</code></td>
-                  <td>{{.Value}}</td>
-                  <td>{{.Type}}</td>
-                  <td>{{.Version}}</td>
+                  <td>{{$kv.Key}}</td>
+                  <td>
+                    <button class="btn btn-sm btn-outline-info py-0 mb-1" type="button" data-bs-toggle="collapse" data-bs-target="#val-{{$index}}" aria-expanded="false">
+                      View Value
+                    </button>
+                    <div class="collapse mt-2" id="val-{{$index}}">
+                      <div class="border rounded p-2 bg-white">
+                        {{$kv.Value}}
+                      </div>
+                    </div>
+                  </td>
+                  <td>{{$kv.Type}}</td>
+                  <td>{{$kv.Version}}</td>
                 </tr>
                 {{end}}
               </tbody>

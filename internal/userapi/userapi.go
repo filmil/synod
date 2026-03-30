@@ -138,7 +138,7 @@ func (a *UserAPI) CompareAndWrite(ctx context.Context, key string, oldValue, new
 // Shutdown initiates a graceful shutdown sequence.
 // It proposes the removal of this node from the cluster and signals the main server to enter lame duck mode.
 func (a *UserAPI) Shutdown(ctx context.Context, req *paxosv1.ShutdownRequest) (*paxosv1.ShutdownResponse, error) {
-	agentID, _, err := a.cell.GetStore().GetAgentID()
+	agentID, err := a.cell.GetStore().GetAgentID()
 	if err != nil {
 		return &paxosv1.ShutdownResponse{Success: false, Message: fmt.Sprintf("failed to get agent ID: %v", err)}, nil
 	}

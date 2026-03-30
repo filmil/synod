@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/filmil/synod/internal/identity"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
@@ -14,6 +15,7 @@ import (
 // Acceptor handles the receiving end of the Paxos protocol, promising and accepting proposals.
 type Acceptor struct {
 	agentID   string
+	ident     *identity.Identity
 	store     *state.Store
 	validator func(ctx context.Context, req *paxosv1.AcceptRequest) error
 	mu        sync.Mutex
@@ -21,9 +23,10 @@ type Acceptor struct {
 
 // NewAcceptor creates and returns a new Acceptor.
 // agentID is the ID of the acceptor, and store is the database to use.
-func NewAcceptor(agentID string, store *state.Store) *Acceptor {
+func NewAcceptor(agentID string, ident *identity.Identity, store *state.Store) *Acceptor {
 	return &Acceptor{
 		agentID: agentID,
+		ident:   ident,
 		store:   store,
 	}
 }
@@ -68,6 +71,16 @@ func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*p
 			AgentId:           a.agentID,
 			Promised:          false,
 			HighestPromisedId: promisedID,
+		}
+	}
+
+	if a.ident != nil {
+		sig, cert, err := a.ident.SignMessage(resp)
+		if err == nil {
+			resp.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
 		}
 	}
 
@@ -135,6 +148,16 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 			AgentId:           a.agentID,
 			Accepted:          false,
 			HighestPromisedId: promisedID,
+		}
+	}
+
+	if a.ident != nil {
+		sig, cert, err := a.ident.SignMessage(resp)
+		if err == nil {
+			resp.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
 		}
 	}
 

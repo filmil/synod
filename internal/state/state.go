@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -10,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/filmil/synod/internal/identity"
 	"github.com/golang/glog"
-	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
@@ -28,6 +29,9 @@ type Store struct {
 	// In-memory storage for keys starting with /_internal
 	internalKVs           map[string]KVEntry
 	internalAcceptorState map[string]acceptorState
+
+	// Identity of the agent
+	ident *identity.Identity
 }
 
 type acceptorState struct {
@@ -149,34 +153,139 @@ func (s *Store) init() error {
 	return nil
 }
 
-// GetAgentID retrieves the persistent agent ID and short name for this node.
-// If they do not exist, a new agent ID is generated and saved.
-func (s *Store) GetAgentID() (string, string, error) {
+// InitializeAgentID retrieves the persistent agent ID and short name for this node.
+// It also initializes the cryptographic identity for this agent if it doesn't exist.
+func (s *Store) InitializeAgentID(passphrase string) (string, string, error) {
+	ident, err := s.GetIdentity(passphrase)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get cryptographic identity: %w", err)
+	}
+
+	agentID := ident.AgentID()
+
 	var id, shortName string
-	err := s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'agent_id'").Scan(&id)
+	err = s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'agent_id'").Scan(&id)
 	err2 := s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'short_name'").Scan(&shortName)
 
 	if err == sql.ErrNoRows || err2 == sql.ErrNoRows {
-		if id == "" {
-			id = uuid.New().String()
-			if _, e := s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('agent_id', ?)", id); e != nil {
+		if id != agentID {
+			if _, e := s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('agent_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", agentID); e != nil {
 				return "", "", fmt.Errorf("failed to insert new agent ID: %w", e)
 			}
-			glog.Infof("Generated new agent ID: %s", id)
+			glog.Infof("Set agent ID to: %s", agentID)
 		}
 		if shortName == "" {
 			shortName = "PendingName" // We will replace this with a real name via the caller
-			if _, e := s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('short_name', ?)", shortName); e != nil {
+			if _, e := s.db.Exec("INSERT INTO agent_info (key, value) VALUES ('short_name', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", shortName); e != nil {
 				return "", "", fmt.Errorf("failed to insert new short name: %w", e)
 			}
 		}
-		return id, shortName, nil
+		return agentID, shortName, nil
 	} else if err != nil {
 		return "", "", fmt.Errorf("failed to query agent ID: %w", err)
 	} else if err2 != nil {
 		return "", "", fmt.Errorf("failed to query short name: %w", err2)
 	}
-	return id, shortName, nil
+
+	if id != agentID {
+		glog.Infof("Updating stored agent ID from %s to %s to match cryptographic identity", id, agentID)
+		if _, e := s.db.Exec("UPDATE agent_info SET value = ? WHERE key = 'agent_id'", agentID); e != nil {
+			return "", "", fmt.Errorf("failed to update agent ID: %w", e)
+		}
+	}
+
+	return agentID, shortName, nil
+}
+
+// GetAgentID returns the established agent ID.
+func (s *Store) GetAgentID() (string, error) {
+	if s.ident != nil {
+		return s.ident.AgentID(), nil
+	}
+	var id string
+	err := s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'agent_id'").Scan(&id)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// GetShortName returns the established short name for this agent.
+func (s *Store) GetShortName() (string, error) {
+	var shortName string
+	err := s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'short_name'").Scan(&shortName)
+	if err != nil {
+		return "", err
+	}
+	return shortName, nil
+}
+
+// GetIdentity retrieves the cryptographic identity for this agent.
+func (s *Store) GetIdentity(passphrase string) (*identity.Identity, error) {
+	if s.ident != nil {
+		return s.ident, nil
+	}
+
+	var certPEM, keyPEM []byte
+	err := s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'identity_cert'").Scan(&certPEM)
+	err2 := s.db.QueryRow("SELECT value FROM agent_info WHERE key = 'identity_key'").Scan(&keyPEM)
+
+	if err == sql.ErrNoRows || err2 == sql.ErrNoRows {
+		glog.Info("Generating new cryptographic identity")
+		ident, err := identity.Generate("Synod Agent") // Default name, caller can update shortName
+		if err != nil {
+			return nil, err
+		}
+		if err := s.SaveIdentity(ident, passphrase); err != nil {
+			return nil, err
+		}
+		s.ident = ident
+		return ident, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to query identity certificate: %w", err)
+	} else if err2 != nil {
+		return nil, fmt.Errorf("failed to query identity key: %w", err2)
+	}
+
+	cert, err := identity.UnmarshalCertificate(certPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal certificate: %w", err)
+	}
+
+	key, err := identity.UnmarshalPrivateKey(keyPEM, passphrase)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal private key: %w", err)
+	}
+
+	s.ident = &identity.Identity{
+		Certificate: cert,
+		PrivateKey:  key,
+	}
+	return s.ident, nil
+}
+
+// SaveIdentity saves the cryptographic identity for this agent to the store.
+func (s *Store) SaveIdentity(ident *identity.Identity, passphrase string) error {
+	certPEM := identity.MarshalCertificate(ident.Certificate)
+	keyPEM, err := identity.MarshalPrivateKey(ident.PrivateKey, passphrase)
+	if err != nil {
+		return fmt.Errorf("failed to marshal private key: %w", err)
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("INSERT INTO agent_info (key, value) VALUES ('identity_cert', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", certPEM); err != nil {
+		return fmt.Errorf("failed to save identity certificate: %w", err)
+	}
+	if _, err := tx.Exec("INSERT INTO agent_info (key, value) VALUES ('identity_key', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", keyPEM); err != nil {
+		return fmt.Errorf("failed to save identity key: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // SetShortName updates the human-readable short name for this node.
@@ -291,6 +400,16 @@ type PeerInfo struct {
 	GRPCAddr  string `json:"grpc_addr"`
 	// HTTPURL is the HTTP dashboard URL for the peer.
 	HTTPURL   string `json:"http_url"`
+	// Certificate is the DER-encoded X.509 certificate of the peer.
+	Certificate []byte `json:"certificate"`
+}
+
+// Equal checks if two PeerInfo structs are identical.
+func (p PeerInfo) Equal(other PeerInfo) bool {
+	if p.ShortName != other.ShortName || p.GRPCAddr != other.GRPCAddr || p.HTTPURL != other.HTTPURL {
+		return false
+	}
+	return bytes.Equal(p.Certificate, other.Certificate)
 }
 
 // AddMember adds or updates a peer in the local membership list.

@@ -20,6 +20,7 @@ import (
 
 	"github.com/bazelbuild/rules_go/go/runfiles"
 	"github.com/filmil/synod/internal/constants"
+	"github.com/filmil/synod/internal/identity"
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/state"
 	"github.com/filmil/synod/internal/userapi"
@@ -66,7 +67,8 @@ type Participant struct {
 
 type IndexData struct {
 	BaseData
-	AgentID      string
+	AgentID      template.HTML
+	AgentCert    string
 	KeysCount    int
 	Participants []Participant
 }
@@ -98,6 +100,8 @@ type KnownPeer struct {
 	Name     string
 	GRPCURL  string
 	HTTPLink template.HTML
+	HasCert  bool
+	CertPEM  string
 }
 
 type PeersData struct {
@@ -106,7 +110,7 @@ type PeersData struct {
 }
 
 type KV struct {
-	Key     string
+	Key     template.HTML
 	Value   template.HTML
 	Type    string
 	Version uint64
@@ -167,6 +171,50 @@ type GRPCStatusData struct {
 	Servers  []GRPCServerData
 	Channels []GRPCChannelData
 }
+
+const (
+	jsonMapTmpl = `
+<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;">
+  <tbody>
+    {{range .}}
+    <tr>
+      <th class="table-light align-top" style="width: 1%; white-space: nowrap;">{{.Key}}</th>
+      <td>{{.Value}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>`
+
+	jsonArrayTmpl = `
+<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;">
+  <tbody>
+    {{range .}}
+    <tr>
+      <th class="table-light align-top" style="width: 1%; white-space: nowrap;">[{{.Index}}]</th>
+      <td>{{.Value}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>`
+
+	wrappedValueTmpl = `<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">{{.}}</div>`
+
+	ptTableTmpl = `
+<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;">
+  <tbody>
+    {{range .}}
+    <tr>
+      {{if .Key}}
+      <th class="table-light align-top" style="width: 1%; white-space: nowrap;">{{.Key}}</th>
+      <td>{{.Value}}</td>
+      {{else}}
+      <td colspan="2">{{.Value}}</td>
+      {{end}}
+    </tr>
+    {{end}}
+  </tbody>
+</table>`
+)
 
 // HTTPServer provides a web dashboard for inspecting agent state and issuing commands.
 type HTTPServer struct {
@@ -262,9 +310,14 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 }
 
 func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	agentID, shortName, err := s.store.GetAgentID()
+	agentID, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	shortName, err := s.store.GetShortName()
+	if err != nil {
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 
@@ -288,13 +341,18 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	data := IndexData{
 		BaseData: BaseData{
-			Title:     "Synod Agent",
+			Title:     "Status",
 			AgentName: shortName,
 			ActiveNav: "status",
 		},
-		AgentID:   agentID,
+		AgentID:   template.HTML(fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(agentID, 40)))),
 		KeysCount: len(kvs),
 	}
+
+	if ident, err := s.store.GetIdentity(""); err == nil {
+		data.AgentCert = string(identity.MarshalCertificate(ident.Certificate))
+	}
+
 
 	var ids []string
 	for id := range members {
@@ -303,9 +361,10 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(ids)
 
 	for _, id := range ids {
-		label := id
+		idWrapped := fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(id, 40)))
+		label := idWrapped
 		if id == agentID {
-			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", id)
+			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", idWrapped)
 		}
 		info := members[id]
 
@@ -335,9 +394,14 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
-	agentID, shortName, err := s.store.GetAgentID()
+	agentID, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	shortName, err := s.store.GetShortName()
+	if err != nil {
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 	entries, err := s.store.GetRecentMessages(100)
@@ -424,9 +488,14 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
-	agentID, shortName, err := s.store.GetAgentID()
+	agentID, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	shortName, err := s.store.GetShortName()
+	if err != nil {
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 
@@ -474,11 +543,20 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
+		certPEM := ""
+		if len(info.Certificate) > 0 {
+			if cert, err := identity.UnmarshalCertificate(info.Certificate); err == nil {
+				certPEM = string(identity.MarshalCertificate(cert))
+			}
+		}
+
 		data.Peers = append(data.Peers, KnownPeer{
 			ID:       id,
 			Name:     info.ShortName,
 			GRPCURL:  grpcURL,
 			HTTPLink: template.HTML(httpLink),
+			HasCert:  len(info.Certificate) > 0,
+			CertPEM:  certPEM,
 		})
 	}
 
@@ -490,9 +568,9 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
-	_, shortName, err := s.store.GetAgentID()
+	shortName, err := s.store.GetShortName()
 	if err != nil {
-		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 	kvs, err := s.store.GetAllKVs()
@@ -511,7 +589,7 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
 
 	for _, kv := range kvs {
 		data.KVs = append(data.KVs, KV{
-			Key:     kv.Key,
+			Key:     template.HTML(fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(kv.Key, 40)))),
 			Value:   template.HTML(maybeJSONToTable(kv.Value)),
 			Type:    kv.Type,
 			Version: kv.Version,
@@ -555,7 +633,7 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, shortName, _ := s.store.GetAgentID()
+	shortName, _ := s.store.GetShortName()
 
 	data := CommandData{
 		BaseData: BaseData{
@@ -575,9 +653,9 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
-	_, shortName, err := s.store.GetAgentID()
+	shortName, err := s.store.GetShortName()
 	if err != nil {
-		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 
@@ -831,42 +909,81 @@ func maybeJSONToTable(data []byte) string {
 		return fmt.Sprintf(`<pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>%s</code></pre>`, html.EscapeString(string(data)))
 	}
 
-	return renderJSONNode(obj)
+	return renderJSONNode(obj, "")
 }
 
-func renderJSONNode(node interface{}) string {
+func wrapString(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	var sb strings.Builder
+	for i, r := range s {
+		if i > 0 && i%limit == 0 {
+			sb.WriteRune('\n')
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
+func renderWrapped(s string, limit int) template.HTML {
+	t := template.Must(template.New("wrapped").Parse(wrappedValueTmpl))
+	var sb strings.Builder
+	t.Execute(&sb, wrapString(s, limit))
+	return template.HTML(sb.String())
+}
+
+func renderJSONNode(node interface{}, keyName string) string {
+	var sb strings.Builder
 	switch v := node.(type) {
 	case map[string]interface{}:
 		if len(v) == 0 {
 			return "{}"
 		}
-		var sb strings.Builder
-		sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
 
+		type entry struct {
+			Key   string
+			Value template.HTML
+		}
+		var entries []entry
 		var keys []string
 		for k := range v {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-
-		for _, key := range keys {
-			val := v[key]
-			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(key), renderJSONNode(val)))
+		for _, k := range keys {
+			entries = append(entries, entry{
+				Key:   k,
+				Value: template.HTML(renderJSONNode(v[k], k)),
+			})
 		}
-		sb.WriteString(`</tbody></table>`)
+		t := template.Must(template.New("jsonMap").Parse(jsonMapTmpl))
+		t.Execute(&sb, entries)
 		return sb.String()
+
 	case []interface{}:
 		if len(v) == 0 {
 			return "[]"
 		}
-		var sb strings.Builder
-		sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
-		for i, val := range v {
-			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">[%d]</th><td>%s</td></tr>`, i, renderJSONNode(val)))
+		type entry struct {
+			Index int
+			Value template.HTML
 		}
-		sb.WriteString(`</tbody></table>`)
+		var entries []entry
+		for i, val := range v {
+			entries = append(entries, entry{
+				Index: i,
+				Value: template.HTML(renderJSONNode(val, "")),
+			})
+		}
+		t := template.Must(template.New("jsonArray").Parse(jsonArrayTmpl))
+		t.Execute(&sb, entries)
 		return sb.String()
+
 	case string:
+		if strings.ToLower(keyName) == "certificate" {
+			return string(renderWrapped(v, 40))
+		}
 		return html.EscapeString(v)
 	case float64:
 		return fmt.Sprintf("%v", v)
@@ -946,34 +1063,45 @@ func renderPTFields(fields []*ptField) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	var sb strings.Builder
-	sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
+
+	type entry struct {
+		Key     string
+		Value   template.HTML
+		IsBlock bool
+	}
+	var entries []entry
 	for _, f := range fields {
-		if f.Key == "" {
-			sb.WriteString(fmt.Sprintf(`<tr><td colspan="2">%s</td></tr>`, html.EscapeString(f.Val)))
-			continue
+		e := entry{
+			Key:     f.Key,
+			IsBlock: f.IsBlock,
 		}
 		if f.IsBlock {
-			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(f.Key), renderPTFields(f.Children)))
-		} else {
+			e.Value = template.HTML(renderPTFields(f.Children))
+		} else if f.Key == "value" {
 			// Decode embedded JSON on the 'value' field exclusively
-			if f.Key == "value" {
-				if unquoted, err := strconv.Unquote(f.Val); err == nil {
-					var obj interface{}
-					if err := json.Unmarshal([]byte(unquoted), &obj); err == nil {
-						sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(f.Key), renderJSONNode(obj)))
-						continue
-					}
+			if unquoted, err := strconv.Unquote(f.Val); err == nil {
+				var obj interface{}
+				if err := json.Unmarshal([]byte(unquoted), &obj); err == nil {
+					e.Value = template.HTML(renderJSONNode(obj, f.Key))
+				} else {
+					e.Value = template.HTML(html.EscapeString(unquoted))
 				}
+			} else {
+				e.Value = template.HTML(html.EscapeString(f.Val))
 			}
+		} else {
 			val := f.Val
 			if strings.HasPrefix(val, `"`) && strings.HasSuffix(val, `"`) {
 				val = val[1 : len(val)-1]
 			}
-			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(f.Key), html.EscapeString(val)))
+			e.Value = template.HTML(html.EscapeString(val))
 		}
+		entries = append(entries, e)
 	}
-	sb.WriteString(`</tbody></table>`)
+
+	var sb strings.Builder
+	t := template.Must(template.New("ptTable").Parse(ptTableTmpl))
+	t.Execute(&sb, entries)
 	return sb.String()
 }
 
@@ -991,9 +1119,9 @@ func prototextToTable(text string) string {
 }
 
 func (s *HTTPServer) handleSystem(w http.ResponseWriter, r *http.Request) {
-	_, shortName, err := s.store.GetAgentID()
+	shortName, err := s.store.GetShortName()
 	if err != nil {
-		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 

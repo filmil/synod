@@ -1,0 +1,12 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "identity",
+    srcs = ["identity.go"],
+    importpath = "github.com/filmil/synod/internal/identity",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@org_golang_google_protobuf//proto",
+        "@org_golang_google_protobuf//reflect/protoreflect",
+    ],
+)

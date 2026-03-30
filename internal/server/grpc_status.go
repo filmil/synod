@@ -13,9 +13,14 @@ import (
 )
 
 func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
-	agentID, shortName, err := s.store.GetAgentID()
+	agentID, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	shortName, err := s.store.GetShortName()
+	if err != nil {
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 
