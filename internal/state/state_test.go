@@ -110,3 +110,77 @@ func TestStoreExclusiveMode(t *testing.T) {
 		t.Errorf("expected 'database is locked' error, got: %v", err)
 	}
 }
+
+func TestValidateKey(t *testing.T) {
+	tests := []struct {
+		key     string
+		wantErr bool
+	}{
+		{"/foo", false},
+		{"/foo/bar", false},
+		{"/", false},
+		{"/_internal/peers", false},
+		{"foo", true},       // No leading slash
+		{"/foo/./bar", true}, // Dot segment
+		{"/foo/../bar", true}, // Dot-dot segment
+		{"/foo//bar", true},  // Empty segment
+		{"/foo/", false},      // Trailing slash (allowed but maybe we should decide)
+	}
+
+	for _, tt := range tests {
+		err := ValidateKey(tt.key)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("ValidateKey(%q) error = %v, wantErr %v", tt.key, err, tt.wantErr)
+		}
+	}
+}
+
+func TestGetKVsByPrefix(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "state-prefix-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	s, err := NewStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer s.Close()
+
+	keys := []string{
+		"/a/1",
+		"/a/2",
+		"/b/1",
+		"/_internal/a/1",
+		"/_internal/b/1",
+	}
+
+	for _, k := range keys {
+		if err := s.CommitKV(k, []byte("val"), "data", 1); err != nil {
+			t.Fatalf("failed to commit KV %s: %v", k, err)
+		}
+	}
+
+	tests := []struct {
+		prefix string
+		want   int
+	}{
+		{"/a", 2},
+		{"/b", 1},
+		{"/_internal", 2},
+		{"/_internal/a", 1},
+		{"/", 5},
+	}
+
+	for _, tt := range tests {
+		entries, err := s.GetKVsByPrefix(tt.prefix)
+		if err != nil {
+			t.Errorf("GetKVsByPrefix(%q) error = %v", tt.prefix, err)
+			continue
+		}
+		if len(entries) != tt.want {
+			t.Errorf("GetKVsByPrefix(%q) got %d entries, want %d", tt.prefix, len(entries), tt.want)
+		}
+	}
+}

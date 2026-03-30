@@ -80,6 +80,9 @@ service UserService {
   // Read fetches the value of a specific key according to the requested quorum.
   rpc Read(ReadRequest) returns (ReadResponse) {}
 
+  // ReadPrefix returns all keys and values matching a specified prefix.
+  rpc ReadPrefix(ReadPrefixRequest) returns (ReadPrefixResponse) {}
+
   // CompareAndWrite proposes a write of a value for a specific key using Compare-and-Swap logic.
   // It will only succeed if the current value matches the `old_value` provided in the request.
   rpc CompareAndWrite(CompareAndWriteRequest) returns (CompareAndWriteResponse) {}
@@ -438,4 +441,20 @@ message ShutdownRequest {
 message ShutdownResponse {
   bool success = 1;
   string message = 2;
+}
+
+// ReadPrefixRequest specifies the prefix to search for.
+message ReadPrefixRequest {
+  // The absolute Unix path prefix.
+  string prefix = 1;
+  // Authentication information.
+  Authentication auth = 2;
+}
+
+// ReadPrefixResponse contains the results of a prefix search.
+message ReadPrefixResponse {
+  // A list of Key-Value entries matching the prefix.
+  repeated ReadResponse entries = 1;
+  // Authentication information.
+  Authentication auth = 2;
 }

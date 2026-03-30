@@ -57,6 +57,11 @@
   the state directory.
 - The state is a key-value store. The keys are unix-like paths, e.g. `/foo/bar`
   and similar.
+  - Keys must be fully valid absolute Unix paths (starting with `/`).
+  - The segments `.` and `..` are not supported, used, or interpreted.
+  - All operations must validate keys before proceeding.
+  - Introduce an efficient storage index for querying all keys with a specified
+    prefix (which itself must be a valid Unix path).
 - Serve a gRPC endpoint that can be used for agents to reach out to each other.
   - If the default gRPC endpoint port is not available, try for 1 minute to find
     a free port to use.
