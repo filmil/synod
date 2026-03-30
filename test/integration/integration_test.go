@@ -49,12 +49,12 @@ func TestIntegration_5Agents(t *testing.T) {
 	}
 
 	// Ensure self is in membership for agent-0
-	if err := agents[0].store.AddMember("agent-0", info0); err != nil {
+	if err := agents[0].store.AddMember(agents[0].id, info0); err != nil {
 		t.Fatalf("failed to add member: %v", err)
 	}
 
 	// Bootstrap agent-0's KV store with itself
-	if err := agents[0].cell.ProposeMembership(context.Background(), "agent-0", info0); err != nil {
+	if err := agents[0].cell.ProposeMembership(context.Background(), agents[0].id, info0); err != nil {
 		t.Fatalf("failed to bootstrap membership for agent-0: %v", err)
 	}
 
@@ -152,9 +152,9 @@ func TestIntegration_5Agents(t *testing.T) {
 			continue
 		}
 
-		content := string(body)
+		content := strings.ReplaceAll(string(body), "\n", "")
 		for j := 0; j < numAgents; j++ {
-			expectedID := fmt.Sprintf("agent-%d", j)
+			expectedID := agents[j].id
 			// Agent i's /peers page lists OTHER peers. The main page lists all.
 			// Let's check both or just the main page.
 			// Actually handlePeers excludes self: if id != agentID { ids = append(ids, id) }
@@ -178,9 +178,9 @@ func TestIntegration_5Agents(t *testing.T) {
 			t.Errorf("Agent %d: failed to read / body: %v", i, err)
 			continue
 		}
-		content = string(body)
+		content = strings.ReplaceAll(string(body), "\n", "")
 		for j := 0; j < numAgents; j++ {
-			expectedID := fmt.Sprintf("agent-%d", j)
+			expectedID := agents[j].id
 			if !strings.Contains(content, expectedID) {
 				t.Errorf("Agent %d: / does not contain expected participant %s", i, expectedID)
 			}
@@ -229,13 +229,19 @@ func newAgentInstance(t *testing.T, id, dir, addr string) *agentInstance {
 		t.Fatalf("failed to create store: %v", err)
 	}
 
+	actualID, _, err := store.InitializeAgentID("")
+	if err != nil {
+		t.Fatalf("failed to initialize agent ID: %v", err)
+	}
+	ident, _ := store.GetIdentity("")
+
 	peerFactory := func(id, addr string) (paxos.PeerClient, error) {
 		return server.NewPaxosClient(id, addr)
 	}
 
-	acceptor := paxos.NewAcceptor(id, store)
-	cell := paxos.NewCell(id, store, acceptor, peerFactory, "", "")
-	srv := server.NewPaxosServer(id, store, acceptor, cell)
+	acceptor := paxos.NewAcceptor(actualID, ident, store)
+	cell := paxos.NewCell(actualID, store, ident, acceptor, peerFactory, "", "")
+	srv := server.NewPaxosServer(actualID, ident, store, acceptor, cell)
 
 	uAPI := userapi.New(cell)
 	cell.SetLockChecker(func(ctx context.Context, key string) error {
@@ -243,7 +249,7 @@ func newAgentInstance(t *testing.T, id, dir, addr string) *agentInstance {
 	})
 
 	return &agentInstance{
-		id:    id,
+		id:    actualID,
 		dir:   dir,
 		store: store,
 		cell:  cell,

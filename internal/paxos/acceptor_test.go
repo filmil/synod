@@ -23,7 +23,7 @@ func TestAcceptor(t *testing.T) {
 	defer store.Close()
 
 	agentID := "test-agent"
-	a := NewAcceptor(agentID, store)
+	a := NewAcceptor(agentID, nil, store)
 	ctx := context.Background()
 
 	// Initial prepare

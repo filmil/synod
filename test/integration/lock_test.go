@@ -38,8 +38,8 @@ func TestIntegration_Locks(t *testing.T) {
 
 	addr0 := agents[0].grpcAddr
 	info0 := state.PeerInfo{ShortName: "agent-0", GRPCAddr: addr0, HTTPURL: agents[0].httpURL}
-	agents[0].store.AddMember("agent-0", info0)
-	agents[0].cell.ProposeMembership(context.Background(), "agent-0", info0)
+	agents[0].store.AddMember(agents[0].id, info0)
+	agents[0].cell.ProposeMembership(context.Background(), agents[0].id, info0)
 
 	for i := 1; i < numAgents; i++ {
 		infoI := state.PeerInfo{ShortName: fmt.Sprintf("agent-%d", i), GRPCAddr: agents[i].grpcAddr, HTTPURL: agents[i].httpURL}
@@ -56,7 +56,7 @@ func TestIntegration_Locks(t *testing.T) {
 		cancel()
 
 		kvResp, _ := client.GetKVEntry(context.Background(), &paxosv1.GetKVEntryRequest{Key: "/_internal/peers"})
-		agents[i].store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: "agent-0"}, kvResp.Value)
+		agents[i].store.SetAcceptedValue("/_internal/peers", &paxosv1.ProposalID{Number: kvResp.Version, AgentId: agents[0].id}, kvResp.Value)
 		agents[i].store.CommitKV("/_internal/peers", kvResp.Value, "membership", kvResp.Version)
 		agents[i].cell.ApplyMembershipChange(kvResp.Value)
 		client.Close()

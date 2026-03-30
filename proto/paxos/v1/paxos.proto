@@ -106,12 +106,22 @@ enum ReadQuorum {
   READ_QUORUM_ALL = 3;       // Read value all peers agree on
 }
 
+// Authentication contains cryptographic proof of identity.
+message Authentication {
+  // The digital signature of the message.
+  bytes signature = 1;
+  // The DER-encoded X.509 certificate of the sender.
+  bytes certificate = 2;
+}
+
 // ReadRequest specifies the key to read and the desired consistency level.
 message ReadRequest {
   // The key to read.
   string key = 1;
   // The desired consistency level.
   ReadQuorum quorum = 2;
+  // Authentication information.
+  Authentication auth = 3;
 }
 
 // ReadResponse contains the value, type, and version of the requested key.
@@ -124,6 +134,8 @@ message ReadResponse {
   string type = 3;
   // The consensus version of the value.
   uint64 version = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
 // WriteQuorum defines the consistency level required for a write operation.
@@ -143,6 +155,8 @@ message CompareAndWriteRequest {
   bytes new_value = 3; // Value to write
   // The required quorum for the write operation.
   WriteQuorum quorum = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
 // CompareAndWriteResponse indicates the result of a Compare-and-Swap proposal.
@@ -153,6 +167,8 @@ message CompareAndWriteResponse {
   string message = 2;
   // The new consensus version if the write succeeded.
   uint64 version = 3;
+  // Authentication information.
+  Authentication auth = 4;
 }
 
 // EndpointInfo contains network addresses for an agent.
@@ -167,12 +183,16 @@ message EndpointInfo {
 message GetPeerEndpointsRequest {
   // The ID of the requesting agent.
   string agent_id = 1;
+  // Authentication information.
+  Authentication auth = 2;
 }
 
 // GetPeerEndpointsResponse returns a map of agent IDs to their known endpoints.
 message GetPeerEndpointsResponse {
   // A map from Agent ID to EndpointInfo.
   map<string, EndpointInfo> endpoints = 1; // Agent ID -> Endpoints
+  // Authentication information.
+  Authentication auth = 2;
 }
 
 // ProposalID uniquely identifies a Paxos proposal.
@@ -193,6 +213,8 @@ message PingRequest {
   string host_port = 3;
   // The HTTP dashboard URL of the sender.
   string http_url = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
 // PingResponse is sent back by the pinged peer, sharing its own endpoint info.
@@ -205,6 +227,8 @@ message PingResponse {
   string host_port = 3;
   // The HTTP dashboard URL of the responder.
   string http_url = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
 // PrepareRequest initiates the Prepare phase of Paxos for a specific key.
@@ -217,6 +241,8 @@ message PrepareRequest {
   string key = 3; // The key we are preparing for
   // A random nonce for tracking requests.
   string nonce = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
 // PromiseResponse is an acceptor's reply to a PrepareRequest.
@@ -231,6 +257,8 @@ message PromiseResponse {
   bytes highest_accepted_value = 4;
   // The ID of the highest numbered proposal the acceptor has promised to (may be higher than the requested proposal_id if rejected).
   ProposalID highest_promised_id = 5;
+  // Authentication information.
+  Authentication auth = 6;
 }
 
 // AcceptRequest initiates the Accept phase of Paxos for a specific key and value.
@@ -245,6 +273,8 @@ message AcceptRequest {
   bytes value = 4;
   // A random nonce for tracking requests.
   string nonce = 5;
+  // Authentication information.
+  Authentication auth = 6;
 }
 
 // AcceptedResponse is an acceptor's reply to an AcceptRequest.
@@ -255,6 +285,8 @@ message AcceptedResponse {
   bool accepted = 2;
   // The ID of the highest numbered proposal the acceptor has promised to.
   ProposalID highest_promised_id = 3;
+  // Authentication information.
+  Authentication auth = 4;
 }
 
 // JoinClusterRequest is sent by a new agent wishing to join the cluster.
@@ -267,6 +299,8 @@ message JoinClusterRequest {
   string short_name = 3;
   // The HTTP dashboard URL of the new agent.
   string http_url = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
 // JoinClusterResponse indicates whether the join request was successful.
@@ -277,6 +311,8 @@ message JoinClusterResponse {
   bool success = 2;
   // A message providing more details, especially on failure.
   string message = 3;
+  // Authentication information.
+  Authentication auth = 4;
 }
 
 // SyncRequest is periodically sent to exchange state versions with peers.
@@ -287,6 +323,8 @@ message SyncRequest {
   string host_port = 2;
   // The HTTP dashboard URL of the sender.
   string http_url = 3;
+  // Authentication information.
+  Authentication auth = 4;
 }
 
 // SyncResponse returns the receiver's known versions for all keys.
@@ -295,12 +333,16 @@ message SyncResponse {
   string agent_id = 1;
   // A map of keys to their highest known consensus version number.
   map<string, uint64> keys = 2; // key -> version
+  // Authentication information.
+  Authentication auth = 3;
 }
 
 // GetKVEntryRequest asks for the full data of a specific key.
 message GetKVEntryRequest {
   // The key to retrieve.
   string key = 1;
+  // Authentication information.
+  Authentication auth = 2;
 }
 
 // GetKVEntryResponse returns the full data for the requested key.
@@ -313,6 +355,8 @@ message GetKVEntryResponse {
   string type = 3;
   // The consensus version of the value.
   uint64 version = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
 // Lock Acquisition Theory

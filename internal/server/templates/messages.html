@@ -71,24 +71,57 @@
 
       <div class="card shadow-sm mb-4">
         <div class="card-header bg-secondary text-white">Recent Messages</div>
-        <div class="card-body">
+        <div class="card-body p-0">
           <div class="table-responsive">
-            <table class="table table-sm table-hover">
+            <table class="table table-sm table-hover mb-0">
               <thead>
                 <tr>
-                  <th>ID</th><th>Time</th><th>Type</th><th>Sender</th><th>Receiver</th><th>Request</th><th>Reply</th>
+                  <th style="width: 200px;">Info</th>
+                  <th>Payload (Request & Reply)</th>
                 </tr>
               </thead>
               <tbody>
                 {{range .Messages}}
                 <tr>
-                  <td>{{.ID}}</td>
-                  <td><small class="text-nowrap">{{.Timestamp}}</small></td>
-                  <td><span class="badge bg-info text-dark">{{.Type}}</span></td>
-                  <td>{{.Sender}}</td>
-                  <td>{{.Receiver}}</td>
-                  <td>{{.Request}}</td>
-                  <td>{{.Reply}}</td>
+                  <td class="align-top border-end bg-light">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                      <strong>#{{.ID}}</strong>
+                      <span class="badge bg-info text-dark">{{.Type}}</span>
+                    </div>
+                    <div class="text-muted" style="font-size: 0.75rem;">{{.Timestamp}}</div>
+                    <div class="mt-2 small">
+                      <div class="text-truncate"><strong>From:</strong> {{.Sender}}</div>
+                      <div class="text-truncate"><strong>To:</strong> {{.Receiver}}</div>
+                    </div>
+                  </td>
+                  <td class="p-0">
+                    <div class="accordion accordion-flush" id="msg-accordion-{{.ID}}">
+                      <div class="accordion-item">
+                        <h2 class="accordion-header">
+                          <button class="accordion-button collapsed py-2 small" type="button" data-bs-toggle="collapse" data-bs-target="#req-{{.ID}}" aria-expanded="false">
+                            Request
+                          </button>
+                        </h2>
+                        <div id="req-{{.ID}}" class="accordion-collapse collapse" data-bs-parent="#msg-accordion-{{.ID}}">
+                          <div class="accordion-body p-2 bg-white">
+                            {{.Request}}
+                          </div>
+                        </div>
+                      </div>
+                      <div class="accordion-item">
+                        <h2 class="accordion-header">
+                          <button class="accordion-button collapsed py-2 small" type="button" data-bs-toggle="collapse" data-bs-target="#resp-{{.ID}}" aria-expanded="false">
+                            Reply
+                          </button>
+                        </h2>
+                        <div id="resp-{{.ID}}" class="accordion-collapse collapse" data-bs-parent="#msg-accordion-{{.ID}}">
+                          <div class="accordion-body p-2 bg-white">
+                            {{.Reply}}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
                 </tr>
                 {{end}}
               </tbody>

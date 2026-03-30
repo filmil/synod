@@ -23,12 +23,19 @@ func setupTestServer(t *testing.T) (*HTTPServer, func()) {
 		t.Fatalf("failed to create store: %v", err)
 	}
 
+	agentID, _, err := store.InitializeAgentID("")
+	if err != nil {
+		t.Fatalf("failed to initialize agent ID: %v", err)
+	}
+
+	ident, _ := store.GetIdentity("")
+
 	// Initialize cell
-	acceptor := paxos.NewAcceptor("test-agent", store)
+	acceptor := paxos.NewAcceptor(agentID, ident, store)
 	factory := func(agentID, addr string) (paxos.PeerClient, error) {
 		return nil, nil // Dummy factory
 	}
-	cell := paxos.NewCell("test-agent", store, acceptor, factory, ":50101", "http://localhost:8081")
+	cell := paxos.NewCell(agentID, store, ident, acceptor, factory, ":50101", "http://localhost:8081")
 
 	server := NewHTTPServer(":8081", store, cell)
 
@@ -70,7 +77,7 @@ func TestHTTPServer_handleIndex(t *testing.T) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	assertHTML(t, string(body), "<title>Synod Agent")
+	assertHTML(t, string(body), "<title>Status -")
 	if !strings.Contains(string(body), "Agent Info") {
 		t.Errorf("expected 'Agent Info' in body")
 	}

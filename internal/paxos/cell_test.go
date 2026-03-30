@@ -25,7 +25,7 @@ func TestCell_ProposeRemoval(t *testing.T) {
 	defer store.Close()
 
 	agentID := "agent-1"
-	acceptor := NewAcceptor(agentID, store)
+	acceptor := NewAcceptor(agentID, nil, store)
 
 	// Pre-populate membership
 	peerID := "peer-to-remove"
@@ -45,7 +45,7 @@ func TestCell_ProposeRemoval(t *testing.T) {
 		t.Fatalf("failed to add peer to membership: %v", err)
 	}
 
-	cell := NewCell(agentID, store, acceptor, nil, "localhost:50051", "http://localhost:8080")
+	cell := NewCell(agentID, store, nil, acceptor, nil, "localhost:50051", "http://localhost:8080")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -89,7 +89,7 @@ func TestCell_PingPeers(t *testing.T) {
 	defer store.Close()
 
 	agentID := "agent-1"
-	acceptor := NewAcceptor(agentID, store)
+	acceptor := NewAcceptor(agentID, nil, store)
 
 	// Pre-populate membership with a responsive and an unresponsive peer
 	peer1ID := "responsive-peer"
@@ -125,7 +125,7 @@ func TestCell_PingPeers(t *testing.T) {
 		return nil, nil
 	}
 
-	cell := NewCell(agentID, store, acceptor, factory, "localhost:50051", "http://localhost:8080")
+	cell := NewCell(agentID, store, nil, acceptor, factory, "localhost:50051", "http://localhost:8080")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
