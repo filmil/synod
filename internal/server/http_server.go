@@ -759,7 +759,20 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 	} else if resultMsg := r.URL.Query().Get("result"); resultMsg != "" {
 		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert">Read Result: <code>%s</code></div>`, html.EscapeString(resultMsg))
 	} else if prefixResult := r.URL.Query().Get("prefix_result"); prefixResult != "" {
-		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert"><h6 class="alert-heading">Prefix Read Result:</h6>%s</div>`, prefixResult)
+		type entry struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		var resEntries []entry
+		if err := json.Unmarshal([]byte(prefixResult), &resEntries); err != nil {
+			// Fallback if not valid JSON (e.g. error message)
+			statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert"><h6 class="alert-heading">Prefix Read Result:</h6>%s</div>`, html.EscapeString(prefixResult))
+		} else {
+			var sb strings.Builder
+			t := template.Must(template.New("prefixRes").Parse(prefixResultsTmpl))
+			t.Execute(&sb, resEntries)
+			statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert"><h6 class="alert-heading">Prefix Read Result:</h6>%s</div>`, sb.String())
+		}
 	}
 	data.StatusMsg = template.HTML(statusMsg)
 
@@ -838,14 +851,14 @@ func (s *HTTPServer) handleUserAPIReadPrefix(w http.ResponseWriter, r *http.Requ
 
 	if len(resp.Entries) == 0 {
 		s.completeOngoingRequest(reqID, true, "no keys found")
-		http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape("<em>No keys found with this prefix.</em>"), http.StatusSeeOther)
+		http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape("No keys found with this prefix."), http.StatusSeeOther)
 		return
 	}
 
-	// Format results as a small table
+	// Format results as JSON
 	type entry struct {
-		Key   string
-		Value string
+		Key   string `json:"key"`
+		Value string `json:"value"`
 	}
 	var resEntries []entry
 	for _, e := range resp.Entries {
@@ -855,12 +868,15 @@ func (s *HTTPServer) handleUserAPIReadPrefix(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	var sb strings.Builder
-	t := template.Must(template.New("prefixRes").Parse(prefixResultsTmpl))
-	t.Execute(&sb, resEntries)
+	jsonBytes, err := json.Marshal(resEntries)
+	if err != nil {
+		s.completeOngoingRequest(reqID, false, err.Error())
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape("failed to encode result"), http.StatusSeeOther)
+		return
+	}
 
 	s.completeOngoingRequest(reqID, true, fmt.Sprintf("found %d entries", len(resp.Entries)))
-	http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape(sb.String()), http.StatusSeeOther)
+	http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape(string(jsonBytes)), http.StatusSeeOther)
 }
 
 func (s *HTTPServer) handleUserAPIWrite(w http.ResponseWriter, r *http.Request) {
