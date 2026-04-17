@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "ping-pkg-go-dev_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/filmil/synod/tools/ai/ping-pkg-go-dev",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "ping-pkg-go-dev",
+    embed = [":ping-pkg-go-dev_lib"],
+    visibility = ["//visibility:public"],
+)
