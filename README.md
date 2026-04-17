@@ -2,6 +2,7 @@
 
 [![Build and Test](https://github.com/filmil/synod/actions/workflows/build-test.yml/badge.svg)](https://github.com/filmil/synod/actions/workflows/build-test.yml)
 [![Release Agent](https://github.com/filmil/synod/actions/workflows/release.yml/badge.svg)](https://github.com/filmil/synod/actions/workflows/release.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/filmil/synod.svg)](https://pkg.go.dev/github.com/filmil/synod)
 
 ## What it does
 
