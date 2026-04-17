@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package main is an executable that generates the names list used by the names package.
 package main
 
