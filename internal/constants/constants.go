@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package constants defines global constants used across the application.
 package constants
 
