@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "userapi",
@@ -17,5 +17,16 @@ go_library(
         "//internal/state",
         "//proto/paxos/v1:paxosv1_go_proto",
         "@com_github_golang_glog//:glog",
+    ],
+)
+
+go_test(
+    name = "userapi_test",
+    srcs = ["userapi_test.go"],
+    embed = [":userapi"],
+    deps = [
+        "//internal/paxos",
+        "//internal/state",
+        "//proto/paxos/v1:paxosv1_go_proto",
     ],
 )
