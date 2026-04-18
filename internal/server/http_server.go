@@ -31,19 +31,19 @@ import (
 // OngoingRequest tracks the state of a User API request initiated via the web dashboard.
 type OngoingRequest struct {
 	// ID is a unique identifier for the request.
-	ID string
+	ID        string
 	// Type indicates the kind of request (e.g., Read, CompareAndWrite).
-	Type string
+	Type      string
 	// Key is the target key path for the request.
-	Key string
+	Key       string
 	// StartTime records when the request was initiated.
 	StartTime time.Time
 	// Result contains the outcome message or value as a string.
-	Result string
+	Result    string
 	// Finished indicates whether the request has completed.
-	Finished bool
+	Finished  bool
 	// Success indicates if a finished request was successful.
-	Success bool
+	Success   bool
 }
 
 //go:embed templates/*.html
@@ -390,6 +390,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if ident, err := s.store.GetIdentity(""); err == nil {
 		data.AgentCert = string(identity.MarshalCertificate(ident.Certificate))
 	}
+
 
 	var ids []string
 	for id := range members {
