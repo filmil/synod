@@ -13,43 +13,52 @@ import (
 )
 
 func main() {
-	// First get the latest commit hash
-	cmd := exec.Command("git", "log", "-n", "1", "--format=%H")
-	out, err := cmd.Output()
-	if err != nil {
-		fmt.Printf("Failed to get git commit hash: %v\n", err)
-		os.Exit(1)
-	}
-	hash := strings.TrimSpace(string(out))
+	var version string
 
-	// Get pseudo-version info from proxy.golang.org
-	url := fmt.Sprintf("https://proxy.golang.org/github.com/filmil/synod/@v/%s.info", hash)
-	fmt.Printf("Fetching proxy info from %s\n", url)
-	resp, err := http.Get(url)
-	if err != nil {
-		fmt.Printf("Error fetching from proxy: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
+	// If an argument is provided, use it directly as the version.
+	if len(os.Args) > 1 {
+		version = os.Args[1]
+	} else {
+		// First get the latest commit hash
+		cmd := exec.Command("git", "log", "-n", "1", "--format=%H")
+		out, err := cmd.Output()
+		if err != nil {
+			fmt.Printf("Failed to get git commit hash: %v\n", err)
+			os.Exit(1)
+		}
+		hash := strings.TrimSpace(string(out))
 
-	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("Failed to fetch proxy info, status: %s\n", resp.Status)
-		os.Exit(1)
-	}
+		// Get pseudo-version info from proxy.golang.org
+		url := fmt.Sprintf("https://proxy.golang.org/github.com/filmil/synod/@v/%s.info", hash)
+		fmt.Printf("Fetching proxy info from %s\n", url)
+		resp, err := http.Get(url)
+		if err != nil {
+			fmt.Printf("Error fetching from proxy: %v\n", err)
+			os.Exit(1)
+		}
+		defer resp.Body.Close()
 
-	var info struct {
-		Version string `json:"Version"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		fmt.Printf("Failed to decode proxy info: %v\n", err)
-		os.Exit(1)
-	}
+		if resp.StatusCode != http.StatusOK {
+			fmt.Printf("Failed to fetch proxy info, status: %s\n", resp.Status)
+			os.Exit(1)
+		}
 
-	// Wait a bit to ensure it propagated
-	time.Sleep(2 * time.Second)
+		var info struct {
+			Version string `json:"Version"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+			fmt.Printf("Failed to decode proxy info: %v\n", err)
+			os.Exit(1)
+		}
+
+		version = info.Version
+
+		// Wait a bit to ensure it propagated
+		time.Sleep(2 * time.Second)
+	}
 
 	// Now ping pkg.go.dev with the specific version
-	fetchURL := fmt.Sprintf("https://pkg.go.dev/fetch/github.com/filmil/synod@%s", info.Version)
+	fetchURL := fmt.Sprintf("https://pkg.go.dev/fetch/github.com/filmil/synod@%s", version)
 	fmt.Printf("Fetching %s\n", fetchURL)
 	fetchResp, err := http.Post(fetchURL, "text/plain", bytes.NewReader(nil))
 	if err != nil {
