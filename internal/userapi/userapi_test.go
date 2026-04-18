@@ -44,11 +44,11 @@ func (m *mockPeer) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 }
 
 func (m *mockPeer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error) {
-	return nil, nil
+	return &paxosv1.JoinClusterResponse{Success: true}, nil
 }
 
 func (m *mockPeer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error) {
-	return nil, nil
+	return &paxosv1.SyncResponse{AgentId: m.agentID}, nil
 }
 
 func (m *mockPeer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error) {
@@ -182,6 +182,44 @@ func TestUserAPI_Read(t *testing.T) {
 	}
 }
 
+func TestUserAPI_Read_NoMatch(t *testing.T) {
+	api, store, cleanup := setupTest(t)
+	defer cleanup()
+
+	key := "/test/key"
+	value := []byte("test-value")
+	version := uint64(1)
+
+	if err := store.CommitKV(key, value, "data", version); err != nil {
+		t.Fatalf("failed to commit kv: %v", err)
+	}
+
+	ctx := context.Background()
+
+	peer1 := &mockPeer{
+		agentID: "peer-1",
+		kvEntries: map[string]*paxosv1.GetKVEntryResponse{
+			key: {Value: []byte("different"), Version: version},
+		},
+	}
+	peer2 := &mockPeer{
+		agentID: "peer-2",
+		kvEntries: map[string]*paxosv1.GetKVEntryResponse{
+			key: {Value: []byte("different-again"), Version: version},
+		},
+	}
+	store.AddMember(peer1.agentID, state.PeerInfo{ShortName: "Peer1", GRPCAddr: "localhost:1111"})
+	store.AddMember(peer2.agentID, state.PeerInfo{ShortName: "Peer2", GRPCAddr: "localhost:2222"})
+
+	api.cell.SetPeers([]paxos.PeerClient{peer1, peer2})
+
+	// Total nodes: 3. Majority: 2. Matches: 1 (self). Should fail.
+	_, err := api.Read(ctx, key, paxosv1.ReadQuorum_READ_QUORUM_MAJORITY)
+	if err == nil {
+		t.Error("Expected Majority Read to fail when no majority matches")
+	}
+}
+
 func TestUserAPI_CompareAndWrite(t *testing.T) {
 	api, store, cleanup := setupTest(t)
 	defer cleanup()
@@ -309,43 +347,5 @@ func TestUserAPI_Locking(t *testing.T) {
 	// 5. Check Lock after release (should fail)
 	if err := api.CheckLocks(ctx, lockablePath); err == nil {
 		t.Error("CheckLocks should have failed after release, but it succeeded")
-	}
-}
-
-func TestUserAPI_Read_NoMatch(t *testing.T) {
-	api, store, cleanup := setupTest(t)
-	defer cleanup()
-
-	key := "/test/key"
-	value := []byte("test-value")
-	version := uint64(1)
-
-	if err := store.CommitKV(key, value, "data", version); err != nil {
-		t.Fatalf("failed to commit kv: %v", err)
-	}
-
-	ctx := context.Background()
-
-	peer1 := &mockPeer{
-		agentID: "peer-1",
-		kvEntries: map[string]*paxosv1.GetKVEntryResponse{
-			key: {Value: []byte("different"), Version: version},
-		},
-	}
-	peer2 := &mockPeer{
-		agentID: "peer-2",
-		kvEntries: map[string]*paxosv1.GetKVEntryResponse{
-			key: {Value: []byte("different-again"), Version: version},
-		},
-	}
-	store.AddMember(peer1.agentID, state.PeerInfo{ShortName: "Peer1", GRPCAddr: "localhost:1111"})
-	store.AddMember(peer2.agentID, state.PeerInfo{ShortName: "Peer2", GRPCAddr: "localhost:2222"})
-
-	api.cell.SetPeers([]paxos.PeerClient{peer1, peer2})
-
-	// Total nodes: 3. Majority: 2. Matches: 1 (self). Should fail.
-	_, err := api.Read(ctx, key, paxosv1.ReadQuorum_READ_QUORUM_MAJORITY)
-	if err == nil {
-		t.Error("Expected Majority Read to fail when no majority matches")
 	}
 }
