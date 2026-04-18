@@ -31,19 +31,19 @@ import (
 // OngoingRequest tracks the state of a User API request initiated via the web dashboard.
 type OngoingRequest struct {
 	// ID is a unique identifier for the request.
-	ID        string
+	ID string
 	// Type indicates the kind of request (e.g., Read, CompareAndWrite).
-	Type      string
+	Type string
 	// Key is the target key path for the request.
-	Key       string
+	Key string
 	// StartTime records when the request was initiated.
 	StartTime time.Time
 	// Result contains the outcome message or value as a string.
-	Result    string
+	Result string
 	// Finished indicates whether the request has completed.
-	Finished  bool
+	Finished bool
 	// Success indicates if a finished request was successful.
-	Success   bool
+	Success bool
 }
 
 //go:embed templates/*.html
@@ -390,7 +390,6 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if ident, err := s.store.GetIdentity(""); err == nil {
 		data.AgentCert = string(identity.MarshalCertificate(ident.Certificate))
 	}
-
 
 	var ids []string
 	for id := range members {
@@ -757,7 +756,22 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 	} else if resultMsg := r.URL.Query().Get("result"); resultMsg != "" {
 		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert">Read Result: <code>%s</code></div>`, html.EscapeString(resultMsg))
 	} else if prefixResult := r.URL.Query().Get("prefix_result"); prefixResult != "" {
-		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert"><h6 class="alert-heading">Prefix Read Result:</h6>%s</div>`, prefixResult)
+		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert"><h6 class="alert-heading">Prefix Read Result:</h6>%s</div>`, html.EscapeString(prefixResult))
+	} else if prefixResultsJSON := r.URL.Query().Get("prefix_results"); prefixResultsJSON != "" {
+		type entry struct {
+			Key   string
+			Value string
+		}
+		var resEntries []entry
+		if err := json.Unmarshal([]byte(prefixResultsJSON), &resEntries); err == nil {
+			var sb strings.Builder
+			t := template.Must(template.New("prefixRes").Parse(prefixResultsTmpl))
+			t.Execute(&sb, resEntries)
+			statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert"><h6 class="alert-heading">Prefix Read Result:</h6>%s</div>`, sb.String())
+		} else {
+			glog.Errorf("Failed to unmarshal prefix_results JSON: %v", err)
+			statusMsg = `<div class="alert alert-danger mb-4" role="alert">Failed to display prefix read results.</div>`
+		}
 	}
 	data.StatusMsg = template.HTML(statusMsg)
 
@@ -836,7 +850,7 @@ func (s *HTTPServer) handleUserAPIReadPrefix(w http.ResponseWriter, r *http.Requ
 
 	if len(resp.Entries) == 0 {
 		s.completeOngoingRequest(reqID, true, "no keys found")
-		http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape("<em>No keys found with this prefix.</em>"), http.StatusSeeOther)
+		http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape("No keys found with this prefix."), http.StatusSeeOther)
 		return
 	}
 
@@ -853,12 +867,15 @@ func (s *HTTPServer) handleUserAPIReadPrefix(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	var sb strings.Builder
-	t := template.Must(template.New("prefixRes").Parse(prefixResultsTmpl))
-	t.Execute(&sb, resEntries)
+	resJSON, err := json.Marshal(resEntries)
+	if err != nil {
+		s.completeOngoingRequest(reqID, false, "failed to marshal results")
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape("failed to marshal results"), http.StatusSeeOther)
+		return
+	}
 
 	s.completeOngoingRequest(reqID, true, fmt.Sprintf("found %d entries", len(resp.Entries)))
-	http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape(sb.String()), http.StatusSeeOther)
+	http.Redirect(w, r, "/userapi?prefix_results="+url.QueryEscape(string(resJSON)), http.StatusSeeOther)
 }
 
 func (s *HTTPServer) handleUserAPIWrite(w http.ResponseWriter, r *http.Request) {
