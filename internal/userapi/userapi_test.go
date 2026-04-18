@@ -4,7 +4,6 @@ package userapi
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -95,7 +94,11 @@ func setupTest(t *testing.T) (*UserAPI, *state.Store, func()) {
 		t.Fatalf("failed to create store: %v", err)
 	}
 
-	agentID := "test-agent"
+	agentID, _, err := store.InitializeAgentID("")
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		t.Fatalf("failed to initialize agent ID: %v", err)
+	}
 	acceptor := paxos.NewAcceptor(agentID, nil, store)
 	cell := paxos.NewCell(agentID, store, nil, acceptor, nil, "localhost:50051", "http://localhost:8080")
 	api := New(cell)
@@ -144,6 +147,11 @@ func TestUserAPI_Read(t *testing.T) {
 			key: {Value: []byte("different"), Version: version},
 		},
 	}
+
+	// Add peers to store so they are not wiped by refreshPeers
+	store.AddMember(peer1.agentID, state.PeerInfo{ShortName: "Peer1", GRPCAddr: "localhost:1111"})
+	store.AddMember(peer2.agentID, state.PeerInfo{ShortName: "Peer2", GRPCAddr: "localhost:2222"})
+
 	api.cell.SetPeers([]paxos.PeerClient{peer1, peer2})
 
 	// Total nodes: 3 (self + 2 peers). Majority is 2.
@@ -252,13 +260,8 @@ func TestUserAPI_Shutdown(t *testing.T) {
 }
 
 func TestUserAPI_Locking(t *testing.T) {
-	api, store, cleanup := setupTest(t)
+	api, _, cleanup := setupTest(t)
 	defer cleanup()
-
-	agentID := "test-agent"
-	if err := store.SetAgentID(agentID); err != nil {
-		t.Fatalf("failed to set agent ID: %v", err)
-	}
 
 	ctx := context.Background()
 	lockablePath := "/a/_lockable/b"
@@ -335,6 +338,9 @@ func TestUserAPI_Read_NoMatch(t *testing.T) {
 			key: {Value: []byte("different-again"), Version: version},
 		},
 	}
+	store.AddMember(peer1.agentID, state.PeerInfo{ShortName: "Peer1", GRPCAddr: "localhost:1111"})
+	store.AddMember(peer2.agentID, state.PeerInfo{ShortName: "Peer2", GRPCAddr: "localhost:2222"})
+
 	api.cell.SetPeers([]paxos.PeerClient{peer1, peer2})
 
 	// Total nodes: 3. Majority: 2. Matches: 1 (self). Should fail.
