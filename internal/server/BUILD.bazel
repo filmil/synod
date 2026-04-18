@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
@@ -9,13 +11,14 @@ go_library(
         "http_server.go",
         "listen.go",
     ],
-    data = ["//third_party/bootstrap"],
     embedsrcs = glob(["templates/*.html"]),
+    data = ["//third_party/bootstrap"],
     importpath = "github.com/filmil/synod/internal/server",
     visibility = ["//visibility:public"],
     deps = [
         "//internal/backoff",
         "//internal/constants",
+        "//internal/identity",
         "//internal/paxos",
         "//internal/state",
         "//internal/userapi",
@@ -33,4 +36,8 @@ go_test(
     name = "server_test",
     srcs = ["http_server_test.go"],
     embed = [":server"],
+    deps = [
+        "//internal/paxos",
+        "//internal/state",
+    ],
 )

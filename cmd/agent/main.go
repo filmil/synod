@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 import (
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/filmil/synod/internal/backoff"
+	"github.com/filmil/synod/internal/identity"
 	"github.com/filmil/synod/internal/names"
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/server"
@@ -26,6 +29,8 @@ var (
 	httpAddr     = flag.String("http_addr", ":8080", "HTTP address to listen on")
 	peerAddr     = flag.String("peer", "", "Address of an existing peer to join the cell")
 	pingInterval = flag.Duration("ping_interval", 2*time.Minute, "Interval to ping peers")
+	identityPass = flag.String("identity_passphrase", "", "Passphrase for the agent's private key")
+	trustedCertsDir = flag.String("trusted_certs_dir", "", "Directory containing trusted peer certificates")
 )
 
 func main() {
@@ -65,9 +70,15 @@ func main() {
 	}
 	defer store.Close()
 
-	agentID, shortName, err := store.GetAgentID()
+	agentID, shortName, err := store.InitializeAgentID(*identityPass)
 	if err != nil {
 		glog.Errorf("Failed to get agent ID: %v", err)
+		os.Exit(1)
+	}
+
+	ident, err := store.GetIdentity(*identityPass)
+	if err != nil {
+		glog.Errorf("Failed to get identity: %v", err)
 		os.Exit(1)
 	}
 
@@ -89,9 +100,9 @@ func main() {
 		return server.NewPaxosClient(id, addr)
 	}
 
-	acceptor := paxos.NewAcceptor(agentID, store)
-	cell := paxos.NewCell(agentID, store, acceptor, peerFactory, finalGrpcAddr, fmt.Sprintf("http://%s", httpLis.Addr().String()))
-	paxosSrv := server.NewPaxosServer(agentID, store, acceptor, cell)
+	acceptor := paxos.NewAcceptor(agentID, ident, store)
+	cell := paxos.NewCell(agentID, store, ident, acceptor, peerFactory, finalGrpcAddr, fmt.Sprintf("http://%s", httpLis.Addr().String()))
+	paxosSrv := server.NewPaxosServer(agentID, ident, store, acceptor, cell)
 	
 	// Create userAPI and inject the lock checking logic into the cell
 	uAPI := userapi.New(cell)
@@ -107,7 +118,17 @@ func main() {
 		joinClient, err = server.NewPaxosClient("temp-peer", *peerAddr)
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			kvResp, err := joinClient.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: constants.PeersKey})
+			req := &paxosv1.GetKVEntryRequest{Key: constants.PeersKey}
+			if ident != nil {
+				sig, cert, err := ident.SignMessage(req)
+				if err == nil {
+					req.Auth = &paxosv1.Authentication{
+						Signature:   sig,
+						Certificate: cert,
+					}
+				}
+			}
+			kvResp, err := joinClient.GetKVEntry(ctx, req)
 			cancel()
 			if err == nil && kvResp.Value != nil {
 				json.Unmarshal(kvResp.Value, &existingPeers)
@@ -144,11 +165,51 @@ func main() {
 	glog.Infof("Starting Synod agent with ID: %s, Name: %s", agentID, shortName)
 
 	selfInfo := state.PeerInfo{
-		ShortName: shortName,
+		ShortName:   shortName,
+		Certificate: ident.Certificate.Raw,
 	}
 	if err := store.AddMember(agentID, selfInfo); err != nil {
 		glog.Errorf("Failed to add self to membership: %v", err)
 		os.Exit(1)
+	}
+
+	// Load trusted certs from directory
+	if *trustedCertsDir != "" {
+		glog.Infof("Loading trusted certificates from: %s", *trustedCertsDir)
+		entries, err := os.ReadDir(*trustedCertsDir)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				path := filepath.Join(*trustedCertsDir, entry.Name())
+				certBytes, err := os.ReadFile(path)
+				if err != nil {
+					glog.Errorf("Failed to read cert file %s: %v", path, err)
+					continue
+				}
+				// Try to unmarshal to verify
+				cert, err := identity.UnmarshalCertificate(certBytes)
+				if err != nil {
+					glog.Errorf("Failed to unmarshal certificate %s: %v", path, err)
+					continue
+				}
+
+				// Deriving agent ID from cert
+				identHelper := &identity.Identity{Certificate: cert}
+				peerID := identHelper.AgentID()
+
+				if peerID != agentID {
+					glog.Infof("Trusting peer %s from certificate %s", peerID, entry.Name())
+					store.AddMember(peerID, state.PeerInfo{
+						ShortName:   "TrustedPeer-" + peerID[:8],
+						Certificate: cert.Raw,
+					})
+				}
+			}
+		} else {
+			glog.Errorf("Failed to read trusted certs dir: %v", err)
+		}
 	}
 
 	// If a peer is provided, we join the cluster.
@@ -163,12 +224,24 @@ func main() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				resp, err := joinClient.JoinCluster(ctx, &paxosv1.JoinClusterRequest{
+				req := &paxosv1.JoinClusterRequest{
 					AgentId:   agentID,
 					HostPort:  finalGrpcAddr,
 					ShortName: shortName,
 					HttpUrl:   fmt.Sprintf("http://%s", httpLis.Addr().String()),
-				})
+				}
+
+				if ident != nil {
+					sig, cert, err := ident.SignMessage(req)
+					if err == nil {
+						req.Auth = &paxosv1.Authentication{
+							Signature:   sig,
+							Certificate: cert,
+						}
+					}
+				}
+
+				resp, err := joinClient.JoinCluster(ctx, req)
 
 				if err != nil {
 					return fmt.Errorf("JoinCluster failed: %w", err)
@@ -193,15 +266,23 @@ func main() {
 			}
 
 			if joinedAgentID != "" {
-				if err := store.AddMember(joinedAgentID, state.PeerInfo{ShortName: "Unknown"}); err != nil {
+				if err := store.AddMember(joinedAgentID, state.PeerInfo{ShortName: "Unknown", GRPCAddr: *peerAddr}); err != nil {
 					glog.Errorf("Failed to add join peer to membership: %v", err)
 				}
-				// Also add the join peer to ephemeral map so we can talk to it
-				cell.UpdateEphemeralPeer(joinedAgentID, *peerAddr, "")
 
 				// Download the consensus value of the list of peers
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				kvResp, err := joinClient.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: constants.PeersKey})
+				req := &paxosv1.GetKVEntryRequest{Key: constants.PeersKey}
+				if ident != nil {
+					sig, cert, err := ident.SignMessage(req)
+					if err == nil {
+						req.Auth = &paxosv1.Authentication{
+							Signature:   sig,
+							Certificate: cert,
+						}
+					}
+				}
+				kvResp, err := joinClient.GetKVEntry(ctx, req)
 				cancel()
 				if err != nil {
 					glog.Errorf("Failed to get peers from join node: %v", err)
@@ -266,7 +347,14 @@ func main() {
 		}
 	}()
 
-	glog.Infof("Synod agent is up and running")
+	glog.Infof("\n\nSynod agent is up and running\n" +
+		"--------------------------------------------------\n" +
+		"Agent ID:   %s\n" +
+		"Short Name: %s\n" +
+		"gRPC Addr:  %s\n" +
+		"HTTP URL:   http://%s\n" +
+		"--------------------------------------------------\n",
+		agentID, shortName, finalGrpcAddr, httpLis.Addr().String())
 
 	select {
 	case err := <-errChan:

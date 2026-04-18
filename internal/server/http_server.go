@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package server
 
 import (
@@ -20,6 +22,7 @@ import (
 
 	"github.com/bazelbuild/rules_go/go/runfiles"
 	"github.com/filmil/synod/internal/constants"
+	"github.com/filmil/synod/internal/identity"
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/state"
 	"github.com/filmil/synod/internal/userapi"
@@ -27,148 +30,232 @@ import (
 	"github.com/golang/glog"
 )
 
+// OngoingRequest tracks the state of a User API request initiated via the web dashboard.
+type OngoingRequest struct {
+	// ID is a unique identifier for the request.
+	ID        string
+	// Type indicates the kind of request (e.g., Read, CompareAndWrite).
+	Type      string
+	// Key is the target key path for the request.
+	Key       string
+	// StartTime records when the request was initiated.
+	StartTime time.Time
+	// Result contains the outcome message or value as a string.
+	Result    string
+	// Finished indicates whether the request has completed.
+	Finished  bool
+	// Success indicates if a finished request was successful.
+	Success   bool
+}
 
-type HeaderData struct {
+//go:embed templates/*.html
+var templateFS embed.FS
+
+var templates = template.Must(template.ParseFS(templateFS, "templates/*.html"))
+
+// HTTPServer provides a web dashboard for inspecting agent state and issuing commands.
+type BaseData struct {
 	Title     string
 	AgentName string
 	ActiveNav string
 }
 
-type ParticipantData struct {
-	Label     template.HTML
+type Participant struct {
+	IDLabel   template.HTML
 	ShortName string
 	GRPCAddr  string
 	HTTPLink  template.HTML
 }
 
 type IndexData struct {
-	HeaderData
-	AgentID      string
+	BaseData
+	AgentID      template.HTML
+	AgentCert    string
 	KeysCount    int
-	Participants []ParticipantData
+	Participants []Participant
 }
 
-type PeerData struct {
+type Peer struct {
 	Label     template.HTML
-	ID        string
-	Name      string
+	AgentID   string
 	Endpoints template.HTML
-	GRPCURL   string
-	HTTPLink  template.HTML
 }
 
-type MessageData struct {
-	ID       uint64
-	Time     string
-	Type     string
-	Sender   string
-	Receiver string
-	Request  template.HTML
-	Reply    template.HTML
+type Message struct {
+	ID        int64
+	Timestamp string
+	Type      string
+	Sender    string
+	Receiver  string
+	Request   template.HTML
+	Reply     template.HTML
 }
 
 type MessagesData struct {
-	HeaderData
-	Peers    []PeerData
-	Messages []MessageData
+	BaseData
+	Peers    []Peer
+	Messages []Message
+}
+
+type KnownPeer struct {
+	ID       string
+	Name     string
+	GRPCURL  string
+	HTTPLink template.HTML
+	HasCert  bool
+	CertPEM  string
 }
 
 type PeersData struct {
-	HeaderData
-	Peers []PeerData
+	BaseData
+	Peers []KnownPeer
 }
 
-type KVData struct {
-	Key     string
+type KV struct {
+	Key     template.HTML
 	Value   template.HTML
 	Type    string
 	Version uint64
 }
 
 type StoreData struct {
-	HeaderData
-	KVs []KVData
+	BaseData
+	KVs []KV
 }
 
 type CommandData struct {
-	HeaderData
+	BaseData
 	Key   string
 	Value string
 }
 
 type UserAPIData struct {
-	HeaderData
-	HasOngoing bool
-	Ongoing    []OngoingRequestTemplate
-	HasSuccess bool
-	ErrorMsg   string
-	ResultMsg  string
-}
-
-type OngoingRequestTemplate struct {
-	Time   string
-	Type   string
-	Key    string
-	Status template.HTML
-	Result string
+	BaseData
+	StatusMsg   template.HTML
+	OngoingHTML template.HTML
 }
 
 type SystemData struct {
-	HeaderData
-	NumCPU         int
-	NumGoroutines  int
-	Alloc          uint64
-	AllocMB        float64
-	TotalAlloc     uint64
-	TotalAllocMB   float64
-	Sys            uint64
-	SysMB          float64
-	NumGC          uint32
-	DumpGoroutines bool
-	Goroutines     string
+	BaseData
+	NumCPU        int
+	NumGoroutines int
+	Alloc         uint64
+	AllocMB       float64
+	TotalAlloc    uint64
+	TotalAllocMB  float64
+	Sys           uint64
+	SysMB         float64
+	NumGC         uint32
+	ShowDump      bool
+	Dump          string
 }
 
-type ServerData struct {
-	ServerID  int64
-	Started   int64
-	Succeeded int64
-	Failed    int64
-	LastCall  string
+type GRPCServerData struct {
+	ServerID       int64
+	CallsStarted   int64
+	CallsSucceeded int64
+	CallsFailed    int64
+	LastCall       string
 }
 
-type ChannelData struct {
-	ChannelID int64
-	Target    string
-	State     string
-	Started   int64
-	Succeeded int64
-	Failed    int64
+type GRPCChannelData struct {
+	ChannelID      int64
+	Target         string
+	State          string
+	CallsStarted   int64
+	CallsSucceeded int64
+	CallsFailed    int64
 }
 
-type GRPCData struct {
-	HeaderData
-	SelfError     bool
-	ConnectError  error
-	ServersError  error
-	ChannelsError error
-	Servers       []ServerData
-	Channels      []ChannelData
+type GRPCStatusData struct {
+	BaseData
+	ErrorMsg template.HTML
+	Servers  []GRPCServerData
+	Channels []GRPCChannelData
 }
 
+const (
+	jsonMapTmpl = `
+<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;">
+  <tbody>
+    {{range .}}
+    <tr>
+      <th class="table-light align-top" style="width: 1%; white-space: nowrap;">{{.Key}}</th>
+      <td>{{.Value}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>`
 
-type OngoingRequest struct {
-	ID        string
-	Type      string
-	Key       string
-	StartTime time.Time
-	Result    string
-	Finished  bool
-	Success   bool
-}
+	jsonArrayTmpl = `
+<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;">
+  <tbody>
+    {{range .}}
+    <tr>
+      <th class="table-light align-top" style="width: 1%; white-space: nowrap;">[{{.Index}}]</th>
+      <td>{{.Value}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>`
 
-//go:embed templates/*.html
-var templatesFS embed.FS
+	wrappedValueTmpl = `<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">{{.}}</div>`
 
+	ptTableTmpl = `
+<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;">
+  <tbody>
+    {{range .}}
+    <tr>
+      {{if .Key}}
+      <th class="table-light align-top" style="width: 1%; white-space: nowrap;">{{.Key}}</th>
+      <td>{{.Value}}</td>
+      {{else}}
+      <td colspan="2">{{.Value}}</td>
+      {{end}}
+    </tr>
+    {{end}}
+  </tbody>
+</table>`
+
+	ongoingRequestsTmpl = `
+<div class="card shadow-sm mb-4">
+  <div class="card-header bg-dark text-white">Recently Executed / Ongoing Requests</div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover">
+        <thead><tr><th>Time</th><th>Type</th><th>Key</th><th>Status</th><th>Result</th></tr></thead>
+        <tbody>
+          {{range .}}
+          <tr>
+            <td>{{.Time}}</td>
+            <td>{{.Type}}</td>
+            <td><code>{{.Key}}</code></td>
+            <td>{{.StatusHTML}}</td>
+            <td><small>{{.Result}}</small></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>`
+
+	prefixResultsTmpl = `
+<div class="table-responsive">
+  <table class="table table-sm table-bordered bg-white mt-2 mb-0" style="font-size: 0.85em;">
+    <thead><tr><th>Key</th><th>Value</th></tr></thead>
+    <tbody>
+      {{range .}}
+      <tr><td><code>{{.Key}}</code></td><td>{{.Value}}</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>`
+
+	fallbackPlainTmpl = `<pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>{{.}}</code></pre>`
+)
+
+// HTTPServer provides a web dashboard for inspecting agent state and issuing commands.
 type HTTPServer struct {
 	store *state.Store
 	cell  *paxos.Cell
@@ -176,17 +263,15 @@ type HTTPServer struct {
 
 	mu              sync.Mutex
 	ongoingRequests []OngoingRequest
-
-	templates *template.Template
 }
 
+// NewHTTPServer initializes a new HTTPServer.
 func NewHTTPServer(addr string, store *state.Store, cell *paxos.Cell) *HTTPServer {
 	return &HTTPServer{
 		addr:            addr,
 		store:           store,
 		cell:            cell,
 		ongoingRequests: []OngoingRequest{},
-		templates:       template.Must(template.ParseFS(templatesFS, "templates/*.html")),
 	}
 }
 
@@ -216,6 +301,7 @@ func (s *HTTPServer) completeOngoingRequest(id string, success bool, result stri
 	}
 }
 
+// Run starts the HTTP server on the provided listener.
 func (s *HTTPServer) Run(lis net.Listener) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -227,6 +313,7 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	mux.HandleFunc("/api/command", s.handleCommand)
 	mux.HandleFunc("/userapi", s.handleUserAPI)
 	mux.HandleFunc("/api/user/read", s.handleUserAPIRead)
+	mux.HandleFunc("/api/user/readprefix", s.handleUserAPIReadPrefix)
 	mux.HandleFunc("/api/user/write", s.handleUserAPIWrite)
 	mux.HandleFunc("/api/user/lock/acquire", s.handleUserAPILockAcquire)
 	mux.HandleFunc("/api/user/lock/release", s.handleUserAPILockRelease)
@@ -262,13 +349,15 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	return http.Serve(lis, mux)
 }
 
-
-
-
 func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	agentID, shortName, err := s.store.GetAgentID()
+	agentID, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	shortName, err := s.store.GetShortName()
+	if err != nil {
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 
@@ -290,6 +379,20 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	data := IndexData{
+		BaseData: BaseData{
+			Title:     "Status",
+			AgentName: shortName,
+			ActiveNav: "status",
+		},
+		AgentID:   template.HTML(fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(agentID, 40)))),
+		KeysCount: len(kvs),
+	}
+
+	if ident, err := s.store.GetIdentity(""); err == nil {
+		data.AgentCert = string(identity.MarshalCertificate(ident.Certificate))
+	}
+
 
 	var ids []string
 	for id := range members {
@@ -297,52 +400,48 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(ids)
 
-	ephemeral := s.cell.GetEphemeralPeers()
-
-	data := IndexData{
-		HeaderData: HeaderData{
-			Title:     "Synod Agent",
-			AgentName: shortName,
-			ActiveNav: "status",
-		},
-		AgentID:      agentID,
-		KeysCount:    len(kvs),
-		Participants: []ParticipantData{},
-	}
-
 	for _, id := range ids {
-		label := id
+		idWrapped := fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(id, 40)))
+		label := idWrapped
 		if id == agentID {
-			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", id)
+			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", idWrapped)
 		}
 		info := members[id]
-		eph := ephemeral[id]
 
 		httpLink := ""
-		if eph.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", eph.HTTPURL, eph.HTTPURL)
+		if info.HTTPURL != "" {
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
-		grpcAddr := eph.GRPCAddr
+		grpcAddr := info.GRPCAddr
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
-		data.Participants = append(data.Participants, ParticipantData{
-			Label:     template.HTML(label),
+		data.Participants = append(data.Participants, Participant{
+			IDLabel:   template.HTML(label),
 			ShortName: info.ShortName,
 			GRPCAddr:  grpcAddr,
 			HTTPLink:  template.HTML(httpLink),
 		})
 	}
 
-	s.templates.ExecuteTemplate(w, "index.html", data)
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "index.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
-	agentID, shortName, err := s.store.GetAgentID()
+	agentID, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	shortName, err := s.store.GetShortName()
+	if err != nil {
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 	entries, err := s.store.GetRecentMessages(100)
@@ -363,6 +462,13 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	data := MessagesData{
+		BaseData: BaseData{
+			Title:     "Messages",
+			AgentName: shortName,
+			ActiveNav: "messages",
+		},
+	}
 
 	var ids []string
 	for id := range members {
@@ -370,37 +476,25 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(ids)
 
-	ephemeral := s.cell.GetEphemeralPeers()
-
-	data := MessagesData{
-		HeaderData: HeaderData{
-			Title:     "Messages",
-			AgentName: shortName,
-			ActiveNav: "messages",
-		},
-		Peers:    []PeerData{},
-		Messages: []MessageData{},
-	}
-
 	for _, id := range ids {
 		info := members[id]
-		eph := ephemeral[id]
 		label := info.ShortName
 		if id == agentID {
 			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", label)
 		}
 
-		grpcAddr := eph.GRPCAddr
+		grpcAddr := info.GRPCAddr
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
 		endpoints := fmt.Sprintf("<code>%s</code>", grpcAddr)
-		if eph.HTTPURL != "" {
-			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", eph.HTTPURL, eph.HTTPURL)
+		if info.HTTPURL != "" {
+			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
 		}
-		data.Peers = append(data.Peers, PeerData{
+
+		data.Peers = append(data.Peers, Peer{
 			Label:     template.HTML(label),
-			ID:        id,
+			AgentID:   id,
 			Endpoints: template.HTML(endpoints),
 		})
 	}
@@ -414,24 +508,34 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 		if info, ok := members[e.Receiver]; ok {
 			receiverName = info.ShortName
 		}
-		data.Messages = append(data.Messages, MessageData{
-			ID:       uint64(e.ID),
-			Time:     e.Timestamp,
-			Type:     e.Type,
-			Sender:   senderName,
-			Receiver: receiverName,
-			Request:  template.HTML(prototextToTable(e.Message)),
-			Reply:    template.HTML(prototextToTable(e.Reply)),
+
+		data.Messages = append(data.Messages, Message{
+			ID:        e.ID,
+			Timestamp: e.Timestamp,
+			Type:      e.Type,
+			Sender:    senderName,
+			Receiver:  receiverName,
+			Request:   template.HTML(prototextToTable(e.Message)),
+			Reply:     template.HTML(prototextToTable(e.Reply)),
 		})
 	}
 
-	s.templates.ExecuteTemplate(w, "messages.html", data)
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "messages.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
-	agentID, shortName, err := s.store.GetAgentID()
+	agentID, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+	shortName, err := s.store.GetShortName()
+	if err != nil {
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 
@@ -448,8 +552,13 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ephemeral := s.cell.GetEphemeralPeers()
-
+	data := PeersData{
+		BaseData: BaseData{
+			Title:     "Peers",
+			AgentName: shortName,
+			ActiveNav: "peers",
+		},
+	}
 
 	var ids []string
 	for id := range members {
@@ -459,47 +568,49 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(ids)
 
-
-	data := PeersData{
-		HeaderData: HeaderData{
-			Title:     "Peers",
-			AgentName: shortName,
-			ActiveNav: "peers",
-		},
-		Peers: []PeerData{},
-	}
-
 	for _, id := range ids {
 		info := members[id]
-		eph := ephemeral[id]
 
-		grpcAddr := eph.GRPCAddr
+		grpcAddr := info.GRPCAddr
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
 		grpcURL := fmt.Sprintf("grpc://%s", grpcAddr)
 
 		httpLink := ""
-		if eph.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", eph.HTTPURL, eph.HTTPURL)
+		if info.HTTPURL != "" {
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
+		certPEM := ""
+		if len(info.Certificate) > 0 {
+			if cert, err := identity.UnmarshalCertificate(info.Certificate); err == nil {
+				certPEM = string(identity.MarshalCertificate(cert))
+			}
+		}
 
-		data.Peers = append(data.Peers, PeerData{
+		data.Peers = append(data.Peers, KnownPeer{
 			ID:       id,
 			Name:     info.ShortName,
 			GRPCURL:  grpcURL,
 			HTTPLink: template.HTML(httpLink),
+			HasCert:  len(info.Certificate) > 0,
+			CertPEM:  certPEM,
 		})
 	}
-	s.templates.ExecuteTemplate(w, "peers.html", data)
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "peers.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
-	_, shortName, err := s.store.GetAgentID()
+	shortName, err := s.store.GetShortName()
 	if err != nil {
-		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 	kvs, err := s.store.GetAllKVs()
@@ -509,23 +620,27 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := StoreData{
-		HeaderData: HeaderData{
+		BaseData: BaseData{
 			Title:     "KV Store",
 			AgentName: shortName,
 			ActiveNav: "store",
 		},
-		KVs: []KVData{},
 	}
 
 	for _, kv := range kvs {
-		data.KVs = append(data.KVs, KVData{
-			Key:     kv.Key,
+		data.KVs = append(data.KVs, KV{
+			Key:     template.HTML(fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(kv.Key, 40)))),
 			Value:   template.HTML(maybeJSONToTable(kv.Value)),
 			Type:    kv.Type,
 			Version: kv.Version,
 		})
 	}
-	s.templates.ExecuteTemplate(w, "store.html", data)
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "store.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
@@ -558,9 +673,10 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, shortName, _ := s.store.GetAgentID()
+	shortName, _ := s.store.GetShortName()
+
 	data := CommandData{
-		HeaderData: HeaderData{
+		BaseData: BaseData{
 			Title:     "Proposal Success",
 			AgentName: shortName,
 			ActiveNav: "",
@@ -568,13 +684,18 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 		Key:   key,
 		Value: val,
 	}
-	s.templates.ExecuteTemplate(w, "command.html", data)
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "command.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
-	_, shortName, err := s.store.GetAgentID()
+	shortName, err := s.store.GetShortName()
 	if err != nil {
-		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 
@@ -583,47 +704,70 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 	copy(ongoing, s.ongoingRequests)
 	s.mu.Unlock()
 
-
-	hasSuccess := r.URL.Query().Get("success") == "true"
-	errorMsg := r.URL.Query().Get("error")
-	resultMsg := r.URL.Query().Get("result")
-
 	data := UserAPIData{
-		HeaderData: HeaderData{
+		BaseData: BaseData{
 			Title:     "User API",
 			AgentName: shortName,
 			ActiveNav: "userapi",
 		},
-		HasOngoing: len(ongoing) > 0,
-		Ongoing:    []OngoingRequestTemplate{},
-		HasSuccess: hasSuccess,
-		ErrorMsg:   errorMsg,
-		ResultMsg:  resultMsg,
 	}
 
-	for _, r := range ongoing {
-		status := "<span class=\"badge bg-secondary\">Ongoing...</span>"
-		if r.Finished {
-			if r.Success {
-				status = "<span class=\"badge bg-success\">Success</span>"
-			} else {
-				status = "<span class=\"badge bg-danger\">Failed</span>"
+	ongoingHTML := ""
+	if len(ongoing) > 0 {
+		type renderEntry struct {
+			Time       string
+			Type       string
+			Key        string
+			StatusHTML template.HTML
+			Result     string
+		}
+		var entries []renderEntry
+		for _, r := range ongoing {
+			status := "<span class=\"badge bg-secondary\">Ongoing...</span>"
+			if r.Finished {
+				if r.Success {
+					status = "<span class=\"badge bg-success\">Success</span>"
+				} else {
+					status = "<span class=\"badge bg-danger\">Failed</span>"
+				}
 			}
+			resultText := r.Result
+			if len(resultText) > 100 {
+				resultText = resultText[:97] + "..."
+			}
+			entries = append(entries, renderEntry{
+				Time:       r.StartTime.Format("15:04:05"),
+				Type:       r.Type,
+				Key:        r.Key,
+				StatusHTML: template.HTML(status),
+				Result:     resultText,
+			})
 		}
-		resultText := r.Result
-		if len(resultText) > 100 {
-			resultText = resultText[:97] + "..."
-		}
-		data.Ongoing = append(data.Ongoing, OngoingRequestTemplate{
-			Time:   r.StartTime.Format("15:04:05"),
-			Type:   r.Type,
-			Key:    r.Key,
-			Status: template.HTML(status),
-			Result: resultText,
-		})
+		var sb strings.Builder
+		t := template.Must(template.New("ongoing").Parse(ongoingRequestsTmpl))
+		t.Execute(&sb, entries)
+		ongoingHTML = sb.String()
 	}
+	data.OngoingHTML = template.HTML(ongoingHTML)
 
-	s.templates.ExecuteTemplate(w, "userapi.html", data)
+	// Check for result flash message
+	statusMsg := ""
+	if r.URL.Query().Get("success") == "true" {
+		statusMsg = `<div class="alert alert-success mb-4" role="alert">Operation completed successfully.</div>`
+	} else if errMsg := r.URL.Query().Get("error"); errMsg != "" {
+		statusMsg = fmt.Sprintf(`<div class="alert alert-danger mb-4" role="alert">Operation failed: %s</div>`, html.EscapeString(errMsg))
+	} else if resultMsg := r.URL.Query().Get("result"); resultMsg != "" {
+		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert">Read Result: <code>%s</code></div>`, html.EscapeString(resultMsg))
+	} else if prefixResult := r.URL.Query().Get("prefix_result"); prefixResult != "" {
+		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert"><h6 class="alert-heading">Prefix Read Result:</h6>%s</div>`, prefixResult)
+	}
+	data.StatusMsg = template.HTML(statusMsg)
+
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "userapi.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleUserAPIRead(w http.ResponseWriter, r *http.Request) {
@@ -669,6 +813,54 @@ func (s *HTTPServer) handleUserAPIRead(w http.ResponseWriter, r *http.Request) {
 	resStr := string(resp.Value)
 	s.completeOngoingRequest(reqID, true, resStr)
 	http.Redirect(w, r, "/userapi?result="+url.QueryEscape(resStr), http.StatusSeeOther)
+}
+
+func (s *HTTPServer) handleUserAPIReadPrefix(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/userapi", http.StatusSeeOther)
+		return
+	}
+
+	prefix := r.FormValue("prefix")
+	reqID := s.addOngoingRequest("ReadPrefix", prefix)
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	userAPI := userapi.New(s.cell)
+	resp, err := userAPI.ReadPrefix(ctx, prefix)
+
+	if err != nil {
+		s.completeOngoingRequest(reqID, false, err.Error())
+		http.Redirect(w, r, "/userapi?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+
+	if len(resp.Entries) == 0 {
+		s.completeOngoingRequest(reqID, true, "no keys found")
+		http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape("<em>No keys found with this prefix.</em>"), http.StatusSeeOther)
+		return
+	}
+
+	// Format results as a small table
+	type entry struct {
+		Key   string
+		Value string
+	}
+	var resEntries []entry
+	for _, e := range resp.Entries {
+		resEntries = append(resEntries, entry{
+			Key:   e.Key,
+			Value: string(e.Value),
+		})
+	}
+
+	var sb strings.Builder
+	t := template.Must(template.New("prefixRes").Parse(prefixResultsTmpl))
+	t.Execute(&sb, resEntries)
+
+	s.completeOngoingRequest(reqID, true, fmt.Sprintf("found %d entries", len(resp.Entries)))
+	http.Redirect(w, r, "/userapi?prefix_result="+url.QueryEscape(sb.String()), http.StatusSeeOther)
 }
 
 func (s *HTTPServer) handleUserAPIWrite(w http.ResponseWriter, r *http.Request) {
@@ -812,45 +1004,87 @@ func maybeJSONToTable(data []byte) string {
 	var obj interface{}
 	if err := json.Unmarshal(data, &obj); err != nil {
 		glog.V(2).Infof("maybeJSONToTable: Not JSON, returning as plain text")
-		return fmt.Sprintf(`<pre class="small mb-0" style="max-height: 100px; overflow: auto;"><code>%s</code></pre>`, html.EscapeString(string(data)))
+		var sb strings.Builder
+		t := template.Must(template.New("plain").Parse(fallbackPlainTmpl))
+		t.Execute(&sb, string(data))
+		return sb.String()
 	}
 
-	return renderJSONNode(obj)
+	return renderJSONNode(obj, "")
 }
 
-func renderJSONNode(node interface{}) string {
+func wrapString(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	var sb strings.Builder
+	for i, r := range s {
+		if i > 0 && i%limit == 0 {
+			sb.WriteRune('\n')
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
+func renderWrapped(s string, limit int) template.HTML {
+	t := template.Must(template.New("wrapped").Parse(wrappedValueTmpl))
+	var sb strings.Builder
+	t.Execute(&sb, wrapString(s, limit))
+	return template.HTML(sb.String())
+}
+
+func renderJSONNode(node interface{}, keyName string) string {
+	var sb strings.Builder
 	switch v := node.(type) {
 	case map[string]interface{}:
 		if len(v) == 0 {
 			return "{}"
 		}
-		var sb strings.Builder
-		sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
 
+		type entry struct {
+			Key   string
+			Value template.HTML
+		}
+		var entries []entry
 		var keys []string
 		for k := range v {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-
-		for _, key := range keys {
-			val := v[key]
-			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(key), renderJSONNode(val)))
+		for _, k := range keys {
+			entries = append(entries, entry{
+				Key:   k,
+				Value: template.HTML(renderJSONNode(v[k], k)),
+			})
 		}
-		sb.WriteString(`</tbody></table>`)
+		t := template.Must(template.New("jsonMap").Parse(jsonMapTmpl))
+		t.Execute(&sb, entries)
 		return sb.String()
+
 	case []interface{}:
 		if len(v) == 0 {
 			return "[]"
 		}
-		var sb strings.Builder
-		sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
-		for i, val := range v {
-			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">[%d]</th><td>%s</td></tr>`, i, renderJSONNode(val)))
+		type entry struct {
+			Index int
+			Value template.HTML
 		}
-		sb.WriteString(`</tbody></table>`)
+		var entries []entry
+		for i, val := range v {
+			entries = append(entries, entry{
+				Index: i,
+				Value: template.HTML(renderJSONNode(val, "")),
+			})
+		}
+		t := template.Must(template.New("jsonArray").Parse(jsonArrayTmpl))
+		t.Execute(&sb, entries)
 		return sb.String()
+
 	case string:
+		if strings.ToLower(keyName) == "certificate" {
+			return string(renderWrapped(v, 40))
+		}
 		return html.EscapeString(v)
 	case float64:
 		return fmt.Sprintf("%v", v)
@@ -930,34 +1164,45 @@ func renderPTFields(fields []*ptField) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	var sb strings.Builder
-	sb.WriteString(`<table class="table table-sm table-bordered mb-0" style="font-size: 0.85em; width: auto; max-width: 100%;"><tbody>`)
+
+	type entry struct {
+		Key     string
+		Value   template.HTML
+		IsBlock bool
+	}
+	var entries []entry
 	for _, f := range fields {
-		if f.Key == "" {
-			sb.WriteString(fmt.Sprintf(`<tr><td colspan="2">%s</td></tr>`, html.EscapeString(f.Val)))
-			continue
+		e := entry{
+			Key:     f.Key,
+			IsBlock: f.IsBlock,
 		}
 		if f.IsBlock {
-			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(f.Key), renderPTFields(f.Children)))
-		} else {
+			e.Value = template.HTML(renderPTFields(f.Children))
+		} else if f.Key == "value" {
 			// Decode embedded JSON on the 'value' field exclusively
-			if f.Key == "value" {
-				if unquoted, err := strconv.Unquote(f.Val); err == nil {
-					var obj interface{}
-					if err := json.Unmarshal([]byte(unquoted), &obj); err == nil {
-						sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(f.Key), renderJSONNode(obj)))
-						continue
-					}
+			if unquoted, err := strconv.Unquote(f.Val); err == nil {
+				var obj interface{}
+				if err := json.Unmarshal([]byte(unquoted), &obj); err == nil {
+					e.Value = template.HTML(renderJSONNode(obj, f.Key))
+				} else {
+					e.Value = template.HTML(html.EscapeString(unquoted))
 				}
+			} else {
+				e.Value = template.HTML(html.EscapeString(f.Val))
 			}
+		} else {
 			val := f.Val
 			if strings.HasPrefix(val, `"`) && strings.HasSuffix(val, `"`) {
 				val = val[1 : len(val)-1]
 			}
-			sb.WriteString(fmt.Sprintf(`<tr><th class="table-light align-top" style="width: 1%%; white-space: nowrap;">%s</th><td>%s</td></tr>`, html.EscapeString(f.Key), html.EscapeString(val)))
+			e.Value = template.HTML(html.EscapeString(val))
 		}
+		entries = append(entries, e)
 	}
-	sb.WriteString(`</tbody></table>`)
+
+	var sb strings.Builder
+	t := template.Must(template.New("ptTable").Parse(ptTableTmpl))
+	t.Execute(&sb, entries)
 	return sb.String()
 }
 
@@ -975,9 +1220,9 @@ func prototextToTable(text string) string {
 }
 
 func (s *HTTPServer) handleSystem(w http.ResponseWriter, r *http.Request) {
-	_, shortName, err := s.store.GetAgentID()
+	shortName, err := s.store.GetShortName()
 	if err != nil {
-		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
 		return
 	}
 
@@ -988,31 +1233,36 @@ func (s *HTTPServer) handleSystem(w http.ResponseWriter, r *http.Request) {
 	numCPU := runtime.NumCPU()
 
 	data := SystemData{
-		HeaderData: HeaderData{
+		BaseData: BaseData{
 			Title:     "System Introspection",
 			AgentName: shortName,
 			ActiveNav: "system",
 		},
-		NumCPU:         numCPU,
-		NumGoroutines:  numGoroutines,
-		Alloc:          m.Alloc,
-		AllocMB:        float64(m.Alloc) / (1024 * 1024),
-		TotalAlloc:     m.TotalAlloc,
-		TotalAllocMB:   float64(m.TotalAlloc) / (1024 * 1024),
-		Sys:            m.Sys,
-		SysMB:          float64(m.Sys) / (1024 * 1024),
-		NumGC:          m.NumGC,
-		DumpGoroutines: false,
+		NumCPU:        numCPU,
+		NumGoroutines: numGoroutines,
+		Alloc:         m.Alloc,
+		AllocMB:       float64(m.Alloc) / (1024 * 1024),
+		TotalAlloc:    m.TotalAlloc,
+		TotalAllocMB:  float64(m.TotalAlloc) / (1024 * 1024),
+		Sys:           m.Sys,
+		SysMB:         float64(m.Sys) / (1024 * 1024),
+		NumGC:         m.NumGC,
 	}
 
 	if r.URL.Query().Get("dump") == "goroutines" {
-		data.DumpGoroutines = true
+		data.ShowDump = true
+
+		// Capture stack dump
 		var sb strings.Builder
 		pprof.Lookup("goroutine").WriteTo(&sb, 1)
-		data.Goroutines = sb.String()
+		data.Dump = sb.String()
 	}
 
-	s.templates.ExecuteTemplate(w, "system.html", data)
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "system.html", data); err != nil {
+		glog.Errorf("Template execution failed: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }
 
 func (s *HTTPServer) handleUserAPIShutdown(w http.ResponseWriter, r *http.Request) {

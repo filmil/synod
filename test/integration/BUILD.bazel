@@ -1,9 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+
 load("@rules_go//go:def.bzl", "go_test")
 
 go_test(
     name = "integration_test",
     srcs = [
-        "http_test.go",
         "integration_test.go",
         "lock_test.go",
         "ping_test.go",

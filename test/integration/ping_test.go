@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package integration
 
 import (
@@ -40,13 +42,17 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 	addr0 := agents[0].grpcAddr
 	info0 := state.PeerInfo{
 		ShortName: "agent-0",
+		GRPCAddr:  addr0,
+		HTTPURL:   agents[0].httpURL,
 	}
-	agents[0].store.AddMember("agent-0", info0)
-	agents[0].cell.ProposeMembership(context.Background(), "agent-0", info0)
+	agents[0].store.AddMember(agents[0].id, info0)
+	agents[0].cell.ProposeMembership(context.Background(), agents[0].id, info0)
 
 	for i := 1; i < numAgents; i++ {
 		infoI := state.PeerInfo{
 			ShortName: fmt.Sprintf("agent-%d", i),
+			GRPCAddr:  agents[i].grpcAddr,
+			HTTPURL:   agents[i].httpURL,
 		}
 		agents[i].store.AddMember(agents[i].id, infoI)
 
@@ -63,12 +69,9 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 
 		// Set membership for new agent so it can sync
 		kvResp, _ := client.GetKVEntry(context.Background(), &paxosv1.GetKVEntryRequest{Key: constants.PeersKey})
-		agents[i].store.SetAcceptedValue(constants.PeersKey, &paxosv1.ProposalID{Number: kvResp.Version, AgentId: "agent-0"}, kvResp.Value)
+		agents[i].store.SetAcceptedValue(constants.PeersKey, &paxosv1.ProposalID{Number: kvResp.Version, AgentId: agents[0].id}, kvResp.Value)
 		agents[i].store.CommitKV(constants.PeersKey, kvResp.Value, "membership", kvResp.Version)
 		agents[i].cell.ApplyMembershipChange(kvResp.Value)
-
-		// Add agent-0 to ephemeral map so we can talk to it
-		agents[i].cell.UpdateEphemeralPeer("agent-0", addr0, agents[0].httpURL)
 
 		client.Close()
 
@@ -89,6 +92,7 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 
 	// Now "kill" agent-2
 	glog.Infof("Killing agent-2...")
+	agent2ID := agents[2].id
 	agents[2].stop()
 
 	// Wait for agent-0 or agent-1 to detect the failure and remove agent-2
@@ -98,13 +102,13 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 
 	// Verify agent-2 is gone from agent-0's view
 	members, _ = agents[0].store.GetMembers()
-	if _, ok := members["agent-2"]; ok {
+	if _, ok := members[agent2ID]; ok {
 		t.Errorf("Unresponsive agent-2 was not removed from agent-0's membership")
 	}
 
 	// Verify agent-2 is gone from agent-1's view
 	members, _ = agents[1].store.GetMembers()
-	if _, ok := members["agent-2"]; ok {
+	if _, ok := members[agent2ID]; ok {
 		t.Errorf("Unresponsive agent-2 was not removed from agent-1's membership")
 	}
 

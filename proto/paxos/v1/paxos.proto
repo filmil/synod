@@ -1,52 +1,109 @@
+// SPDX-License-Identifier: Apache-2.0
+
 syntax = "proto3";
 
 package paxos.v1;
 
 option go_package = "github.com/filmil/synod/proto/paxos/v1;paxosv1";
 
+// Theory of Operation
+//
+// Synod is a distributed Key-Value store that uses the Paxos consensus
+// algorithm to ensure consistency across multiple agents. Each agent
+// can propose values for keys, and consensus is reached when a quorum
+// of agents accepts a proposal.
+//
+// Paxos Phase 1 (Prepare/Promise):
+// 1. A Proposer selects a proposal number n and sends a PrepareRequest
+//    with number n to a majority of Acceptors.
+// 2. If an Acceptor receives a PrepareRequest with number n greater
+//    than that of any PrepareRequest to which it has already responded,
+//    it responds with a PromiseResponse, promising not to accept any
+//    more proposals numbered less than n, and including the highest-numbered
+//    proposal (if any) that it has accepted.
+//
+// Paxos Phase 2 (Accept/Accepted):
+// 3. If the Proposer receives responses to its PrepareRequests from a
+//    majority of Acceptors, it sends an AcceptRequest to each of those
+//    Acceptors for a proposal numbered n with a value v.
+// 4. If an Acceptor receives an AcceptRequest for a proposal numbered
+//    n, it accepts the proposal unless it has already promised not to
+//    by responding to a PrepareRequest having a number greater than n.
+//
+// Diagram:
+// Proposer            Acceptor 1          Acceptor 2
+//    |--- Prepare(n) ---->|                   |
+//    |--- Prepare(n) ------------------------>|
+//    |<-- Promise(n) -----|                   |
+//    |<-- Promise(n) -------------------------|
+//    |--- Accept(n, v) -->|                   |
+//    |--- Accept(n, v) ---------------------->|
+//    |<-- Accepted(n) ----|                   |
+//    |<-- Accepted(n) ------------------------|
+
+// PaxosService is the core communication service for cluster management
+// and internal consensus (Paxos). These endpoints are primarily used
+// by agents communicating with one another.
 service PaxosService {
-  // Prepare a proposal.
+  // Prepare initiates the first phase of the Paxos algorithm.
+  // It proposes a new sequence number and asks acceptors to promise
+  // not to accept any proposals with a lower number.
   rpc Prepare(PrepareRequest) returns (PromiseResponse) {}
 
-  // Accept a proposal.
+  // Accept initiates the second phase of the Paxos algorithm.
+  // It asks acceptors to accept a specific value for a proposal number
+  // that was previously promised in the Prepare phase.
   rpc Accept(AcceptRequest) returns (AcceptedResponse) {}
 
-  // Request to join the cluster.
+  // JoinCluster requests a node to join the Paxos cluster.
+  // It's called by a new node contacting an existing cluster member.
   rpc JoinCluster(JoinClusterRequest) returns (JoinClusterResponse) {}
 
-  // Used for continuously syncing up the view of agent identities and KV store.
+  // Sync is used for continuously syncing up the view of agent identities and KV store.
+  // It allows agents to share their local highest seen version for all keys.
   rpc Sync(SyncRequest) returns (SyncResponse) {}
 
-  // Fetch a Key-Value entry.
+  // GetKVEntry fetches a specific Key-Value entry.
+  // It is generally used during synchronization (CatchUp) when a peer
+  // discovers it is lagging behind on a specific key.
   rpc GetKVEntry(GetKVEntryRequest) returns (GetKVEntryResponse) {}
 
-  // Ping an agent.
+  // Ping an agent to check if it's alive and update endpoint information.
   rpc Ping(PingRequest) returns (PingResponse) {}
 
-  // Fetch known endpoints for all peers.
+  // GetPeerEndpoints fetches known endpoints for all peers in the cluster.
+  // Useful for discovering network addresses of other agents.
   rpc GetPeerEndpoints(GetPeerEndpointsRequest) returns (GetPeerEndpointsResponse) {}
 }
 
+// UserService provides a client-facing API for interacting with the Key-Value store.
+// Clients use this service to read data, propose changes, and manage distributed locks.
 service UserService {
-  // Read the value of a specific key.
+  // Read fetches the value of a specific key according to the requested quorum.
   rpc Read(ReadRequest) returns (ReadResponse) {}
 
-  // Propose a write of a value for a specific key using Compare-and-Swap logic.
+  // ReadPrefix returns all keys and values matching a specified prefix.
+  rpc ReadPrefix(ReadPrefixRequest) returns (ReadPrefixResponse) {}
+
+  // CompareAndWrite proposes a write of a value for a specific key using Compare-and-Swap logic.
+  // It will only succeed if the current value matches the `old_value` provided in the request.
   rpc CompareAndWrite(CompareAndWriteRequest) returns (CompareAndWriteResponse) {}
 
-  // Acquire a lock on a key path.
+  // AcquireLock attempts to acquire a distributed lock on a key path.
+  // If the key path contains `_lockable` segments, it locks them sequentially.
   rpc AcquireLock(AcquireLockRequest) returns (AcquireLockResponse) {}
 
-  // Release a lock on a key path.
+  // ReleaseLock releases a previously acquired lock on a key path.
   rpc ReleaseLock(ReleaseLockRequest) returns (ReleaseLockResponse) {}
 
-  // Renew a lock on a key path.
+  // RenewLock extends the duration of a previously acquired lock on a key path.
   rpc RenewLock(RenewLockRequest) returns (RenewLockResponse) {}
 
   // Shut down the node.
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse) {}
 }
 
+// ReadQuorum defines the consistency level required for a read operation.
 enum ReadQuorum {
   READ_QUORUM_UNSPECIFIED = 0;
   READ_QUORUM_LOCAL = 1;     // Read from current peer only
@@ -54,160 +111,329 @@ enum ReadQuorum {
   READ_QUORUM_ALL = 3;       // Read value all peers agree on
 }
 
+// Authentication contains cryptographic proof of identity.
+message Authentication {
+  // The digital signature of the message.
+  bytes signature = 1;
+  // The DER-encoded X.509 certificate of the sender.
+  bytes certificate = 2;
+}
+
+// ReadRequest specifies the key to read and the desired consistency level.
 message ReadRequest {
+  // The key to read.
   string key = 1;
+  // The desired consistency level.
   ReadQuorum quorum = 2;
+  // Authentication information.
+  Authentication auth = 3;
 }
 
+// ReadResponse contains the value, type, and version of the requested key.
 message ReadResponse {
+  // The requested key.
   string key = 1;
+  // The value of the key.
   bytes value = 2;
+  // The type of the value (e.g., "data", "membership").
   string type = 3;
+  // The consensus version of the value.
   uint64 version = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
+// WriteQuorum defines the consistency level required for a write operation.
 enum WriteQuorum {
   WRITE_QUORUM_UNSPECIFIED = 0;
   WRITE_QUORUM_MAJORITY = 1; // Consensus by majority
   WRITE_QUORUM_ALL = 2;      // Consensus by all agents
 }
 
+// CompareAndWriteRequest contains the parameters for a Compare-and-Swap proposal.
 message CompareAndWriteRequest {
+  // The key to write.
   string key = 1;
+  // The expected current value. The write will fail if the actual value differs.
   bytes old_value = 2; // Expected old value
+  // The new value to write if the `old_value` matches.
   bytes new_value = 3; // Value to write
+  // The required quorum for the write operation.
   WriteQuorum quorum = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
+// CompareAndWriteResponse indicates the result of a Compare-and-Swap proposal.
 message CompareAndWriteResponse {
+  // True if the write succeeded, false otherwise.
   bool success = 1;
+  // A descriptive message, usually explaining a failure.
   string message = 2;
+  // The new consensus version if the write succeeded.
   uint64 version = 3;
+  // Authentication information.
+  Authentication auth = 4;
 }
 
+// EndpointInfo contains network addresses for an agent.
 message EndpointInfo {
+  // The gRPC host and port (e.g., "10.0.0.1:50051").
   string host_port = 1;
+  // The HTTP dashboard URL (e.g., "http://10.0.0.1:8080").
   string http_url = 2;
 }
 
+// GetPeerEndpointsRequest requests known endpoints from an agent.
 message GetPeerEndpointsRequest {
+  // The ID of the requesting agent.
   string agent_id = 1;
+  // Authentication information.
+  Authentication auth = 2;
 }
 
+// GetPeerEndpointsResponse returns a map of agent IDs to their known endpoints.
 message GetPeerEndpointsResponse {
+  // A map from Agent ID to EndpointInfo.
   map<string, EndpointInfo> endpoints = 1; // Agent ID -> Endpoints
+  // Authentication information.
+  Authentication auth = 2;
 }
 
+// ProposalID uniquely identifies a Paxos proposal.
 message ProposalID {
+  // The sequence number of the proposal. Must be monotonically increasing.
   uint64 number = 1;
+  // The ID of the agent making the proposal. Used as a tiebreaker.
   string agent_id = 2;
 }
 
+// PingRequest is sent to check if a peer is responsive and share endpoint info.
 message PingRequest {
+  // The ID of the agent sending the ping.
   string agent_id = 1;
+  // A random nonce used to correlate requests and responses.
   string nonce = 2;
+  // The gRPC host and port of the sender.
   string host_port = 3;
+  // The HTTP dashboard URL of the sender.
   string http_url = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
+// PingResponse is sent back by the pinged peer, sharing its own endpoint info.
 message PingResponse {
+  // The ID of the agent responding.
   string agent_id = 1;
+  // The nonce received in the PingRequest.
   string nonce = 2;
+  // The gRPC host and port of the responder.
   string host_port = 3;
+  // The HTTP dashboard URL of the responder.
   string http_url = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
+// PrepareRequest initiates the Prepare phase of Paxos for a specific key.
 message PrepareRequest {
+  // The ID of the proposer.
   string agent_id = 1;
+  // The ID of the proposal being prepared.
   ProposalID proposal_id = 2;
+  // The key being proposed for.
   string key = 3; // The key we are preparing for
+  // A random nonce for tracking requests.
   string nonce = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
+// PromiseResponse is an acceptor's reply to a PrepareRequest.
 message PromiseResponse {
+  // The ID of the acceptor.
   string agent_id = 1;
+  // True if the acceptor promises not to accept lower numbered proposals.
   bool promised = 2;
+  // The ID of the highest numbered proposal the acceptor has previously accepted (if any).
   ProposalID highest_accepted_id = 3;
+  // The value of the highest numbered proposal the acceptor has previously accepted (if any).
   bytes highest_accepted_value = 4;
+  // The ID of the highest numbered proposal the acceptor has promised to (may be higher than the requested proposal_id if rejected).
   ProposalID highest_promised_id = 5;
+  // Authentication information.
+  Authentication auth = 6;
 }
 
+// AcceptRequest initiates the Accept phase of Paxos for a specific key and value.
 message AcceptRequest {
+  // The ID of the proposer.
   string agent_id = 1;
+  // The ID of the proposal being accepted (must have been previously promised).
   ProposalID proposal_id = 2;
+  // The key being proposed for.
   string key = 3;
+  // The value being proposed.
   bytes value = 4;
+  // A random nonce for tracking requests.
   string nonce = 5;
+  // Authentication information.
+  Authentication auth = 6;
 }
 
+// AcceptedResponse is an acceptor's reply to an AcceptRequest.
 message AcceptedResponse {
+  // The ID of the acceptor.
   string agent_id = 1;
+  // True if the acceptor accepted the proposal, false if it had promised a higher numbered proposal.
   bool accepted = 2;
+  // The ID of the highest numbered proposal the acceptor has promised to.
   ProposalID highest_promised_id = 3;
+  // Authentication information.
+  Authentication auth = 4;
 }
 
+// JoinClusterRequest is sent by a new agent wishing to join the cluster.
 message JoinClusterRequest {
+  // The ID of the new agent.
   string agent_id = 1;
+  // The gRPC host and port of the new agent.
   string host_port = 2;
+  // The human-readable short name of the new agent.
   string short_name = 3;
+  // The HTTP dashboard URL of the new agent.
   string http_url = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
+// JoinClusterResponse indicates whether the join request was successful.
 message JoinClusterResponse {
+  // The ID of the agent processing the join request.
   string agent_id = 1;
+  // True if the request was accepted and proposed, false otherwise.
   bool success = 2;
+  // A message providing more details, especially on failure.
   string message = 3;
+  // Authentication information.
+  Authentication auth = 4;
 }
 
+// SyncRequest is periodically sent to exchange state versions with peers.
 message SyncRequest {
+  // The ID of the agent initiating the sync.
   string agent_id = 1;
+  // The gRPC host and port of the sender.
   string host_port = 2;
+  // The HTTP dashboard URL of the sender.
   string http_url = 3;
+  // Authentication information.
+  Authentication auth = 4;
 }
 
+// SyncResponse returns the receiver's known versions for all keys.
 message SyncResponse {
+  // The ID of the agent responding to the sync.
   string agent_id = 1;
+  // A map of keys to their highest known consensus version number.
   map<string, uint64> keys = 2; // key -> version
+  // Authentication information.
+  Authentication auth = 3;
 }
 
+// GetKVEntryRequest asks for the full data of a specific key.
 message GetKVEntryRequest {
+  // The key to retrieve.
   string key = 1;
+  // Authentication information.
+  Authentication auth = 2;
 }
 
+// GetKVEntryResponse returns the full data for the requested key.
 message GetKVEntryResponse {
+  // The requested key.
   string key = 1;
+  // The value of the key.
   bytes value = 2;
+  // The type of the value (e.g., "data", "membership").
   string type = 3;
+  // The consensus version of the value.
   uint64 version = 4;
+  // Authentication information.
+  Authentication auth = 5;
 }
 
+// Lock Acquisition Theory
+//
+// Locks are implemented as special values within the Key-Value store.
+// When an agent wants to acquire a lock on a key path, it identifies
+// all segments in the path that end with `_lockable`. It then sequentially
+// attempts to acquire a lock on each of these segments.
+//
+// A lock is acquired by proposing a `LockData` object containing the
+// acquiring agent's ID and an expiration timestamp. If the consensus
+// proposal succeeds and the lock was not previously held by another
+// active agent, the lock is considered acquired.
+//
+// The lock must be renewed periodically before the expiration timestamp
+// passes, otherwise other agents can claim it.
 
+// AcquireLockRequest attempts to acquire a lock for a specified duration.
+// This is used when a client wants to gain exclusive access to a resource
+// path that contains `_lockable` segments.
 message AcquireLockRequest {
+  // The hierarchical path of the lock (e.g., "/resource/_lockable/item").
   string key_path = 1;
+  // The duration to hold the lock in milliseconds.
   int64 duration_ms = 2;
 }
 
+// AcquireLockResponse indicates the result of a lock acquisition attempt.
+// This is returned after a client submits an AcquireLockRequest, letting
+// them know if they successfully gained the lock or if it was blocked.
 message AcquireLockResponse {
+  // True if the lock was successfully acquired.
   bool success = 1;
+  // A message providing more details.
   string message = 2;
 }
 
+// ReleaseLockRequest attempts to release a previously acquired lock.
+// This is used when a client is finished with an exclusively held resource
+// and wishes to free it up for other agents before the lock expires.
 message ReleaseLockRequest {
+  // The hierarchical path of the lock.
   string key_path = 1;
 }
 
+// ReleaseLockResponse indicates the result of a lock release attempt.
+// This is returned to let the client know if they successfully relinquished
+// their hold on the lock.
 message ReleaseLockResponse {
+  // True if the lock was successfully released.
   bool success = 1;
+  // A message providing more details.
   string message = 2;
 }
 
+// RenewLockRequest attempts to extend the duration of an existing lock.
+// This is used periodically by a client that currently holds a lock to
+// ensure it does not expire while they are still using the resource.
 message RenewLockRequest {
+  // The hierarchical path of the lock.
   string key_path = 1;
+  // The new duration to hold the lock for, in milliseconds, from the current time.
   int64 duration_ms = 2;
 }
 
+// RenewLockResponse indicates the result of a lock renewal attempt.
+// This is returned to let the client know if they successfully extended
+// their lease, or if they lost the lock (e.g., if they waited too long).
 message RenewLockResponse {
+  // True if the lock was successfully renewed.
   bool success = 1;
+  // A message providing more details.
   string message = 2;
 }
 
@@ -217,4 +443,20 @@ message ShutdownRequest {
 message ShutdownResponse {
   bool success = 1;
   string message = 2;
+}
+
+// ReadPrefixRequest specifies the prefix to search for.
+message ReadPrefixRequest {
+  // The absolute Unix path prefix.
+  string prefix = 1;
+  // Authentication information.
+  Authentication auth = 2;
+}
+
+// ReadPrefixResponse contains the results of a prefix search.
+message ReadPrefixResponse {
+  // A list of Key-Value entries matching the prefix.
+  repeated ReadResponse entries = 1;
+  // Authentication information.
+  Authentication auth = 2;
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package userapi
 
 import (
@@ -8,14 +10,17 @@ import (
 
 	"github.com/filmil/synod/internal/backoff"
 	"github.com/filmil/synod/internal/paxos"
+	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 )
 
+// UserAPI provides client-facing operations for interacting with the Key-Value store.
 type UserAPI struct {
 	cell *paxos.Cell
 }
 
+// New creates a new UserAPI instance backed by the given Paxos cell.
 func New(cell *paxos.Cell) *UserAPI {
 	return &UserAPI{cell: cell}
 }
@@ -136,7 +141,7 @@ func (a *UserAPI) CompareAndWrite(ctx context.Context, key string, oldValue, new
 // Shutdown initiates a graceful shutdown sequence.
 // It proposes the removal of this node from the cluster and signals the main server to enter lame duck mode.
 func (a *UserAPI) Shutdown(ctx context.Context, req *paxosv1.ShutdownRequest) (*paxosv1.ShutdownResponse, error) {
-	agentID, _, err := a.cell.GetStore().GetAgentID()
+	agentID, err := a.cell.GetStore().GetAgentID()
 	if err != nil {
 		return &paxosv1.ShutdownResponse{Success: false, Message: fmt.Sprintf("failed to get agent ID: %v", err)}, nil
 	}
@@ -158,3 +163,29 @@ func (a *UserAPI) Shutdown(ctx context.Context, req *paxosv1.ShutdownRequest) (*
 	return &paxosv1.ShutdownResponse{Success: true, Message: "Shutdown initiated. Entering lame duck mode."}, nil
 }
 
+// ReadPrefix returns all non-deleted Key-Value entries matching the specified prefix.
+func (a *UserAPI) ReadPrefix(ctx context.Context, prefix string) (*paxosv1.ReadPrefixResponse, error) {
+	if err := state.ValidateKey(prefix); err != nil {
+		return nil, err
+	}
+
+	entries, err := a.cell.GetStore().GetKVsByPrefix(prefix)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read prefix %s: %w", prefix, err)
+	}
+
+	resp := &paxosv1.ReadPrefixResponse{
+		Entries: make([]*paxosv1.ReadResponse, 0, len(entries)),
+	}
+
+	for _, e := range entries {
+		resp.Entries = append(resp.Entries, &paxosv1.ReadResponse{
+			Key:     e.Key,
+			Value:   e.Value,
+			Type:    e.Type,
+			Version: e.Version,
+		})
+	}
+
+	return resp, nil
+}

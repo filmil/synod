@@ -57,6 +57,11 @@
   the state directory.
 - The state is a key-value store. The keys are unix-like paths, e.g. `/foo/bar`
   and similar.
+  - Keys must be fully valid absolute Unix paths (starting with `/`).
+  - The segments `.` and `..` are not supported, used, or interpreted.
+  - All operations must validate keys before proceeding.
+  - Introduce an efficient storage index for querying all keys with a specified
+    prefix (which itself must be a valid Unix path).
 - Serve a gRPC endpoint that can be used for agents to reach out to each other.
   - If the default gRPC endpoint port is not available, try for 1 minute to find
     a free port to use.
@@ -227,6 +232,11 @@
   properly.
 - Add this task to the "Safety" section of the specification.
 
+#### Update S.4: Evict dead peers lacking endpoints
+
+- Ensure that for the process which tries to figure out the endpoints for unknown peer endpoints: every 5th time a peer address is not found, propose removing that peer from the quorum.
+- Update the specification to reflect this.
+
 ### User API endpoints
 
 #### Feature A.1: Introduce user API
@@ -295,8 +305,87 @@ treat writes.
 - Then it enters lame duck mode for 1 minute where it does not respond to requests and takes no new connections.
 - After 1 minute, the agent process shuts down.
 
+### Security
+
+
+#### C.1: identity
+
+* Have each agent either generate a new cryptographic identity or reuse an
+  existing saved one.
+  * Each agent must have a unique cryptographic identity (e.g., an X.509
+    certificate with a unique subject).
+* Generate but do not enforce this identity just yet.
+* Modify the GRPC API and storage to propagate this identity in all messages
+  and all relevant storage contexts.
+* This identity must be used to sign all Paxos messages.
+* The trusted identities of other agents must be managed securely.
+  - Initially, a list of trusted peer certificates can be provided at startup.
+  - For dynamic consensus, new peer certificates must be added to the trusted
+    list only after a successful Paxos decision.
+  - When a peer is removed from the cell, its certificate must be removed from
+    the trusted list.
+* The agent's private key must be protected.
+  - Do not store it unencrypted on disk.
+  - Load it from a secure source (e.g., a hardware security module or an
+    encrypted file with a passphrase).
+* The UUID identity of an agent should be derived from its cryptographic
+  identity (e.g., a hash of its public key).
+  - This ensures a strong link between the cryptographic identity and the
+    logical identity.
+
+#### C.2: secure identity provided
+
+* Create a command line tool, identity generator which creates the known certs
+  and keys for N (configurable) agents.
+* Have the generator create config files for all agents to use
+* Add a flag to the agent, which provides the path to the identity file.
+
+#### C.3: secure identity enforced
+
+* Implement infrastructure for key management
+  * gRPC API for
+* All gRPC communication between agents must be mutually authenticated.
+  - Use TLS for this.
+  - Each agent must present its certificate to the other agent.
+  - The certificate must be signed by a trusted CA.
+  - The trusted CA certificate must be provided to each agent at startup.
+  - The agent's certificate and private key must be provided to each agent at
+    startup.
+  - If any of these are missing, the agent must refuse to start.
+  - If the certificate is invalid or expired, the agent must refuse to start.
+  - If the certificate is not signed by the trusted CA, the agent must refuse
+    to start.
+- All HTTP communication must be served over TLS.
+  - Use the same certificate and private key as for gRPC.
+  - If any of these are missing, the agent must refuse to start.
+  - If the certificate is invalid or expired, the agent must refuse to start.
+* Each agent must verify the signature of all incoming Paxos messages.
+  - If the signature is invalid, the message must be discarded.
+  - If the sender's identity is not known or trusted, the message must be
+    discarded.
+- Implement proper access control for the user API endpoints.
+  - Only authenticated and authorized users should be able to issue commands.
+  - For now, assume a simple token-based authentication.
+  - The token must be provided by the user with each API request.
+  - The agent must validate the token against a pre-configured list of valid
+    tokens.
+  - If the token is missing or invalid, the agent must refuse the command.
+- Log all security-relevant events (e.g., authentication failures,
+  authorization failures, data access attempts).
+  - Log at an appropriate severity level (e.g., `glog.Warningf` or
+    `glog.Errorf`).
+  - Include relevant details in the log messages (e.g., source IP, user ID,
+    attempted action).
+
+
 
 ## Bugs
+
+### B.4: Persist peer ports in membership
+
+- Update the data schema for membership to include the http port and grpc port of a node.
+- Remove ephemeral storage for the http port and grpc port.
+
 
 ### B.1: /api/command
 

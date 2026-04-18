@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package userapi
 
 import (
@@ -52,6 +54,7 @@ func extractLockPaths(keyPath string) []string {
 	return lockPaths
 }
 
+// AcquireLock attempts to acquire locks for all lockable segments in a key path.
 func (a *UserAPI) AcquireLock(ctx context.Context, req *paxosv1.AcquireLockRequest) (*paxosv1.AcquireLockResponse, error) {
 	lockPaths := extractLockPaths(req.KeyPath)
 	if len(lockPaths) == 0 {
@@ -66,7 +69,7 @@ func (a *UserAPI) AcquireLock(ctx context.Context, req *paxosv1.AcquireLockReque
 		}
 	}
 
-	agentID, _, _ := a.cell.GetStore().GetAgentID()
+	agentID, _ := a.cell.GetStore().GetAgentID()
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 
 	// Acquire locks sequentially
@@ -120,6 +123,7 @@ func (a *UserAPI) acquireSingleLock(ctx context.Context, lockPath, agentID strin
 	return resp.Success, nil
 }
 
+// ReleaseLock releases locks for all lockable segments in a key path that are held by this agent.
 func (a *UserAPI) ReleaseLock(ctx context.Context, req *paxosv1.ReleaseLockRequest) (*paxosv1.ReleaseLockResponse, error) {
 	lockPaths := extractLockPaths(req.KeyPath)
 	if len(lockPaths) == 0 {
@@ -127,7 +131,7 @@ func (a *UserAPI) ReleaseLock(ctx context.Context, req *paxosv1.ReleaseLockReque
 			lockPaths = []string{req.KeyPath}
 		}
 	}
-	agentID, _, _ := a.cell.GetStore().GetAgentID()
+	agentID, _ := a.cell.GetStore().GetAgentID()
 
 	for i := len(lockPaths) - 1; i >= 0; i-- {
 		lockPath := lockPaths[i]
@@ -157,6 +161,7 @@ func (a *UserAPI) ReleaseLock(ctx context.Context, req *paxosv1.ReleaseLockReque
 	return &paxosv1.ReleaseLockResponse{Success: true, Message: "Locks released"}, nil
 }
 
+// RenewLock attempts to renew the lease duration for all lockable segments in a key path.
 func (a *UserAPI) RenewLock(ctx context.Context, req *paxosv1.RenewLockRequest) (*paxosv1.RenewLockResponse, error) {
 	lockPaths := extractLockPaths(req.KeyPath)
 	if len(lockPaths) == 0 {
@@ -164,7 +169,7 @@ func (a *UserAPI) RenewLock(ctx context.Context, req *paxosv1.RenewLockRequest) 
 			lockPaths = []string{req.KeyPath}
 		}
 	}
-	agentID, _, _ := a.cell.GetStore().GetAgentID()
+	agentID, _ := a.cell.GetStore().GetAgentID()
 	duration := time.Duration(req.DurationMs) * time.Millisecond
 
 	now := time.Now().UnixNano()
@@ -212,7 +217,7 @@ func (a *UserAPI) CheckLocks(ctx context.Context, keyPath string) error {
 		return nil
 	}
 
-	agentID, _, _ := a.cell.GetStore().GetAgentID()
+	agentID, _ := a.cell.GetStore().GetAgentID()
 	now := time.Now().UnixNano()
 
 	for _, lockPath := range lockPaths {

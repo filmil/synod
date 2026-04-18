@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package paxos
 
 import (
@@ -5,25 +7,40 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/filmil/synod/internal/identity"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 	"google.golang.org/protobuf/encoding/prototext"
 )
 
+// Acceptor handles the receiving end of the Paxos protocol, promising and accepting proposals.
 type Acceptor struct {
-	agentID string
-	store   *state.Store
-	mu      sync.Mutex
+	agentID   string
+	ident     *identity.Identity
+	store     *state.Store
+	validator func(ctx context.Context, req *paxosv1.AcceptRequest) error
+	mu        sync.Mutex
 }
 
-func NewAcceptor(agentID string, store *state.Store) *Acceptor {
+// NewAcceptor creates and returns a new Acceptor.
+// agentID is the ID of the acceptor, and store is the database to use.
+func NewAcceptor(agentID string, ident *identity.Identity, store *state.Store) *Acceptor {
 	return &Acceptor{
 		agentID: agentID,
+		ident:   ident,
 		store:   store,
 	}
 }
 
+// SetValidator configures a validation hook for AcceptRequests.
+func (a *Acceptor) SetValidator(v func(ctx context.Context, req *paxosv1.AcceptRequest) error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.validator = v
+}
+
+// Prepare processes a PrepareRequest (Phase 1a) and determines whether to issue a promise (Phase 1b).
 func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*paxosv1.PromiseResponse, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -59,6 +76,16 @@ func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*p
 		}
 	}
 
+	if a.ident != nil {
+		sig, cert, err := a.ident.SignMessage(resp)
+		if err == nil {
+			resp.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
+		}
+	}
+
 	// Log the message
 	opts := prototext.MarshalOptions{Multiline: true}
 	reqBytes := []byte(opts.Format(req))
@@ -69,6 +96,7 @@ func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*p
 	return resp, nil
 }
 
+// Accept processes an AcceptRequest (Phase 2a) and determines whether to accept the proposed value (Phase 2b).
 func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*paxosv1.AcceptedResponse, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -82,6 +110,28 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 	}
 
 	var resp *paxosv1.AcceptedResponse
+
+	// Execute external validation hook if present
+	if a.validator != nil {
+		if err := a.validator(ctx, req); err != nil {
+			glog.Warningf("Acceptor(%s): Validator rejected Accept for key %s: %v", a.agentID, req.Key, err)
+			resp = &paxosv1.AcceptedResponse{
+				AgentId:           a.agentID,
+				Accepted:          false,
+				HighestPromisedId: promisedID,
+			}
+
+			// Log the rejection
+			opts := prototext.MarshalOptions{Multiline: true}
+			reqBytes := []byte(opts.Format(req))
+			respBytes := []byte(opts.Format(resp))
+			if logErr := a.store.LogMessage("Accept", req.AgentId, a.agentID, reqBytes, respBytes); logErr != nil {
+				glog.Errorf("Acceptor(%s): Failed to log Accept message: %v", a.agentID, logErr)
+			}
+			return resp, nil
+		}
+	}
+
 	// Accept if proposal ID is >= promised ID
 	if isGreaterEqual(req.ProposalId, promisedID) {
 		glog.Infof("Acceptor(%s): Accepted proposal %v for key %s", a.agentID, req.ProposalId, req.Key)
@@ -100,6 +150,16 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 			AgentId:           a.agentID,
 			Accepted:          false,
 			HighestPromisedId: promisedID,
+		}
+	}
+
+	if a.ident != nil {
+		sig, cert, err := a.ident.SignMessage(resp)
+		if err == nil {
+			resp.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
 		}
 	}
 

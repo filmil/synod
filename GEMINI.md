@@ -65,3 +65,9 @@ of this pull request.
 - Add to README.md the status badges of the github workflows.
 - On major updates, update the README.md file with summary of features that exist.
 - Format all Markdown files you touch to 80 columns.
+
+
+## Go code style
+
+- When adding generated HTML, instead of inline strings, use HTML templates,
+  and place the template text into string constants.

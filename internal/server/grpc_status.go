@@ -1,7 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package server
 
 import (
 	"context"
+	"fmt"
+	"html/template"
 	"net/http"
 	"time"
 
@@ -11,34 +15,49 @@ import (
 )
 
 func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
-	agentID, shortName, err := s.store.GetAgentID()
+	agentID, err := s.store.GetAgentID()
 	if err != nil {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
 	}
+	shortName, err := s.store.GetShortName()
+	if err != nil {
+		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
+		return
+	}
 
-	data := GRPCData{
-		HeaderData: HeaderData{
+	data := GRPCStatusData{
+		BaseData: BaseData{
 			Title:     "gRPC Introspection",
 			AgentName: shortName,
 			ActiveNav: "grpc",
 		},
 	}
 
-	eph, ok := s.cell.GetEphemeralPeer(agentID)
-	if !ok || eph.GRPCAddr == "" {
-		data.SelfError = true
-		s.templates.ExecuteTemplate(w, "grpc.html", data)
+	members, err := s.store.GetMembers()
+	if err != nil {
+		data.ErrorMsg = template.HTML("<div class='alert alert-danger'>Failed to retrieve members</div>")
+		w.Header().Set("Content-Type", "text/html")
+		templates.ExecuteTemplate(w, "grpc.html", data)
+		return
+	}
+
+	selfInfo, ok := members[agentID]
+	if !ok || selfInfo.GRPCAddr == "" {
+		data.ErrorMsg = template.HTML("<div class='alert alert-danger'>gRPC address not found for self</div>")
+		w.Header().Set("Content-Type", "text/html")
+		templates.ExecuteTemplate(w, "grpc.html", data)
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	conn, err := grpc.NewClient(eph.GRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(selfInfo.GRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		data.ConnectError = err
-		s.templates.ExecuteTemplate(w, "grpc.html", data)
+		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-danger'>Failed to connect to local gRPC channelz: %v</div>", err))
+		w.Header().Set("Content-Type", "text/html")
+		templates.ExecuteTemplate(w, "grpc.html", data)
 		return
 	}
 	defer conn.Close()
@@ -48,7 +67,7 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 	// Get Servers
 	serversResp, err := client.GetServers(ctx, &grpc_channelz_v1.GetServersRequest{})
 	if err != nil {
-		data.ServersError = err
+		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-warning'>Failed to get servers: %v</div>", err))
 	}
 
 	if serversResp != nil && len(serversResp.Server) > 0 {
@@ -63,12 +82,12 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 					lastCall = srv.Data.LastCallStartedTimestamp.AsTime().Format(time.RFC3339)
 				}
 			}
-			data.Servers = append(data.Servers, ServerData{
-				ServerID:  srv.Ref.ServerId,
-				Started:   started,
-				Succeeded: succeeded,
-				Failed:    failed,
-				LastCall:  lastCall,
+			data.Servers = append(data.Servers, GRPCServerData{
+				ServerID:       srv.Ref.ServerId,
+				CallsStarted:   started,
+				CallsSucceeded: succeeded,
+				CallsFailed:    failed,
+				LastCall:       lastCall,
 			})
 		}
 	}
@@ -76,7 +95,12 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 	// Get Top Channels
 	channelsResp, err := client.GetTopChannels(ctx, &grpc_channelz_v1.GetTopChannelsRequest{})
 	if err != nil {
-		data.ChannelsError = err
+		errMsg := fmt.Sprintf("<div class='alert alert-warning'>Failed to get top channels: %v</div>", err)
+		if data.ErrorMsg != "" {
+			data.ErrorMsg = template.HTML(string(data.ErrorMsg) + errMsg)
+		} else {
+			data.ErrorMsg = template.HTML(errMsg)
+		}
 	}
 
 	if channelsResp != nil && len(channelsResp.Channel) > 0 {
@@ -96,16 +120,19 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 				succeeded = ch.Data.CallsSucceeded
 				failed = ch.Data.CallsFailed
 			}
-			data.Channels = append(data.Channels, ChannelData{
-				ChannelID: chId,
-				Target:    target,
-				State:     state,
-				Started:   started,
-				Succeeded: succeeded,
-				Failed:    failed,
+			data.Channels = append(data.Channels, GRPCChannelData{
+				ChannelID:      chId,
+				Target:         target,
+				State:          state,
+				CallsStarted:   started,
+				CallsSucceeded: succeeded,
+				CallsFailed:    failed,
 			})
 		}
 	}
 
-	s.templates.ExecuteTemplate(w, "grpc.html", data)
+	w.Header().Set("Content-Type", "text/html")
+	if err := templates.ExecuteTemplate(w, "grpc.html", data); err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
 }

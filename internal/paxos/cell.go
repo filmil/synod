@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package paxos
 
 import (
@@ -6,53 +8,75 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/filmil/synod/internal/constants"
 
 	"github.com/filmil/synod/internal/backoff"
+	"github.com/filmil/synod/internal/identity"
 	"github.com/filmil/synod/internal/state"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 	"github.com/google/uuid"
 )
 
+// MembershipChange describes a cluster membership change.
 type MembershipChange struct {
-	Action  string `json:"action"`
+	// Action is the type of change (e.g. "add", "remove").
+	Action string `json:"action"`
+	// AgentID is the ID of the agent being changed.
 	AgentID string `json:"agent_id"`
+	// Address is the address of the agent being added.
 	Address string `json:"address"`
 }
 
+// PeerClient represents an interface for communicating with a remote Paxos peer.
 type PeerClient interface {
+	// Prepare sends a PrepareRequest to the remote peer.
 	Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*paxosv1.PromiseResponse, error)
+	// Accept sends an AcceptRequest to the remote peer.
 	Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*paxosv1.AcceptedResponse, error)
+	// JoinCluster requests the remote peer to allow this agent to join the cluster.
 	JoinCluster(ctx context.Context, req *paxosv1.JoinClusterRequest) (*paxosv1.JoinClusterResponse, error)
+	// Sync synchronizes data with the remote peer.
 	Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxosv1.SyncResponse, error)
+	// GetKVEntry retrieves a key-value entry from the remote peer.
 	GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryRequest) (*paxosv1.GetKVEntryResponse, error)
+	// Ping sends a PingRequest to check if the peer is alive.
 	Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxosv1.PingResponse, error)
+	// GetPeerEndpoints fetches endpoint information from the peer.
 	GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeerEndpointsRequest) (*paxosv1.GetPeerEndpointsResponse, error)
+	// AgentID returns the ID of the remote peer.
 	AgentID() string
+	// Close terminates the connection to the peer.
 	Close() error
 }
 
+// PeerFactory creates a PeerClient given an agent ID and address.
 type PeerFactory func(agentID, address string) (PeerClient, error)
 
+// ConnectionInfo encapsulates network connection details for an agent.
 type ConnectionInfo struct {
+	// GRPCAddr is the host:port for gRPC communication.
 	GRPCAddr string
-	HTTPURL  string
+	// HTTPURL is the base URL for the agent's HTTP dashboard.
+	HTTPURL string
 }
 
+// Cell coordinates the Paxos consensus process for this agent, managing
+// communication with peers, handling proposals, and maintaining state.
 type Cell struct {
 	agentID  string
 	store    *state.Store
+	ident    *identity.Identity
 	acceptor *Acceptor
 	proposer *Proposer
 
 	mu             sync.Mutex
-	peers          map[string]PeerClient
-	ephemeralPeers map[string]ConnectionInfo // Key: AgentID (UUID)
-	peerFactory    PeerFactory
+	peers               map[string]PeerClient
+	peerFactory         PeerFactory
 
 	selfGRPCAddr string
 	selfHTTPURL  string
@@ -60,31 +84,114 @@ type Cell struct {
 	// Optional hook for lock checking during Propose
 	lockChecker func(ctx context.Context, key string) error
 
-	ShutdownChan chan struct{}
-	shuttingDown bool
-	selfInfo     state.PeerInfo
+	ShutdownChan        chan struct{}
+	shuttingDown        bool
+	selfInfo            state.PeerInfo
+	missedEndpointCount map[string]int
 }
 
-func NewCell(agentID string, store *state.Store, acceptor *Acceptor, factory PeerFactory, selfGRPCAddr, selfHTTPURL string) *Cell {
+func NewCell(agentID string, store *state.Store, ident *identity.Identity, acceptor *Acceptor, factory PeerFactory, selfGRPCAddr, selfHTTPURL string) *Cell {
 	c := &Cell{
-		agentID:        agentID,
-		store:          store,
-		acceptor:       acceptor,
-		peers:          make(map[string]PeerClient),
-		ephemeralPeers: make(map[string]ConnectionInfo),
-		peerFactory:    factory,
-		selfGRPCAddr:   selfGRPCAddr,
-		selfHTTPURL:    selfHTTPURL,
-		ShutdownChan:   make(chan struct{}),
-		proposer:       NewProposer(agentID, []PeerClient{}, acceptor),
+		agentID:             agentID,
+		store:               store,
+		ident:               ident,
+		acceptor:            acceptor,
+		peers:               make(map[string]PeerClient),
+		peerFactory:         factory,
+		selfGRPCAddr:        selfGRPCAddr,
+		selfHTTPURL:         selfHTTPURL,
+		ShutdownChan:        make(chan struct{}),
+		proposer:            NewProposer(agentID, ident, []PeerClient{}, acceptor),
+		missedEndpointCount: make(map[string]int),
 	}
-	if selfGRPCAddr != "" || selfHTTPURL != "" {
-		c.ephemeralPeers[agentID] = ConnectionInfo{
-			GRPCAddr: selfGRPCAddr,
-			HTTPURL:  selfHTTPURL,
+	c.acceptor.SetValidator(c.validateAccept)
+	return c
+}
+
+func (c *Cell) validateAccept(ctx context.Context, req *paxosv1.AcceptRequest) error {
+	// Only validate membership updates
+	if !strings.HasPrefix(req.Key, constants.PeersKey+"@") {
+		return nil
+	}
+
+	var newPeers map[string]state.PeerInfo
+	if err := json.Unmarshal(req.Value, &newPeers); err != nil {
+		return fmt.Errorf("failed to unmarshal proposed peers: %w", err)
+	}
+
+	members, err := c.store.GetMembers()
+	if err != nil {
+		return fmt.Errorf("failed to read current peers: %w", err)
+	}
+
+	// Check if any peer is being removed
+	for currID, currInfo := range members {
+		if _, ok := newPeers[currID]; !ok {
+			// currID is being removed.
+			// If the proposal comes from the node being removed (voluntary shutdown), allow it.
+			if currID == req.AgentId {
+				continue
+			}
+
+			// Otherwise, verify if it's truly unreachable
+			glog.Infof("Cell(%s): Validating removal of peer %s proposed by %s", c.agentID, currID, req.AgentId)
+			if err := c.pingNode(ctx, currID, currInfo); err == nil {
+				return fmt.Errorf("refusing removal of reachable peer %s", currID)
+			} else {
+				glog.Infof("Cell(%s): Peer %s confirmed unreachable (%v), allowing removal", c.agentID, currID, err)
+			}
 		}
 	}
-	return c
+	return nil
+}
+
+func (c *Cell) pingNode(ctx context.Context, id string, info state.PeerInfo) error {
+	if id == c.agentID {
+		return nil
+	}
+
+	c.mu.Lock()
+	client, ok := c.peers[id]
+	c.mu.Unlock()
+
+	var tempClient bool
+	if !ok {
+		if c.peerFactory == nil || info.GRPCAddr == "" {
+			return fmt.Errorf("cannot ping node: no factory or address")
+		}
+		var err error
+		client, err = c.peerFactory(id, info.GRPCAddr)
+		if err != nil {
+			return err
+		}
+		tempClient = true
+	}
+	if tempClient {
+		defer client.Close()
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	nonce := uuid.New().String()
+	req := &paxosv1.PingRequest{
+		AgentId:  c.agentID,
+		Nonce:    nonce,
+		HostPort: c.selfGRPCAddr,
+		HttpUrl:  c.selfHTTPURL,
+	}
+
+	if c.ident != nil {
+		sig, cert, err := c.ident.SignMessage(req)
+		if err == nil {
+			req.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
+		}
+	}
+
+	_, err := client.Ping(pingCtx, req)
+	return err
 }
 
 func (c *Cell) SetSelfInfo(info state.PeerInfo) {
@@ -145,47 +252,20 @@ func (c *Cell) checkAndRejoin(ctx context.Context) {
 	}
 }
 
+// SetLockChecker configures an optional hook for checking locks during proposals.
 func (c *Cell) SetLockChecker(checker func(ctx context.Context, key string) error) {
 	c.lockChecker = checker
 }
 
+// SetSelfAddress updates the node's own address information.
 func (c *Cell) SetSelfAddress(grpcAddr, httpURL string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.selfGRPCAddr = grpcAddr
 	c.selfHTTPURL = httpURL
-	c.ephemeralPeers[c.agentID] = ConnectionInfo{
-		GRPCAddr: grpcAddr,
-		HTTPURL:  httpURL,
-	}
 }
 
-func (c *Cell) UpdateEphemeralPeer(agentID, grpcAddr, httpURL string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.ephemeralPeers[agentID] = ConnectionInfo{
-		GRPCAddr: grpcAddr,
-		HTTPURL:  httpURL,
-	}
-}
-
-func (c *Cell) GetEphemeralPeers() map[string]ConnectionInfo {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	res := make(map[string]ConnectionInfo)
-	for k, v := range c.ephemeralPeers {
-		res[k] = v
-	}
-	return res
-}
-
-func (c *Cell) GetEphemeralPeer(agentID string) (ConnectionInfo, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	info, ok := c.ephemeralPeers[agentID]
-	return info, ok
-}
-
+// SetPeers directly sets the internal list of connected peers.
 func (c *Cell) SetPeers(peers []PeerClient) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -193,10 +273,15 @@ func (c *Cell) SetPeers(peers []PeerClient) {
 	for _, p := range peers {
 		c.peers[p.AgentID()] = p
 	}
-	c.proposer = NewProposer(c.agentID, peers, c.acceptor)
+	c.proposer = NewProposer(c.agentID, c.ident, peers, c.acceptor)
 }
 
+// Propose attempts to reach consensus on updating a key with a new value using the
+// specified quorum constraint. It automatically retries on concurrent modification errors.
 func (c *Cell) Propose(ctx context.Context, key string, value []byte, qt QuorumType) error {
+	if err := state.ValidateKey(key); err != nil {
+		return err
+	}
 	bo := backoff.New()
 	bo.MaxElapsedTime = 2 * time.Minute
 
@@ -234,6 +319,7 @@ func (c *Cell) Propose(ctx context.Context, key string, value []byte, qt QuorumT
 	})
 }
 
+// ProposeMembership initiates a proposal to add or update an agent's membership in the cluster.
 func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state.PeerInfo) error {
 	key := constants.PeersKey
 	bo := backoff.New()
@@ -255,7 +341,7 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 		}
 
 		// Check if already correct
-		if existing, ok := peers[agentID]; ok && existing == info {
+		if existing, ok := peers[agentID]; ok && existing.Equal(info) {
 			glog.V(2).Infof("Cell(%s): Membership for %s is already correct", c.agentID, agentID)
 			return nil
 		}
@@ -298,6 +384,7 @@ func (c *Cell) ProposeMembership(ctx context.Context, agentID string, info state
 	})
 }
 
+// ProposeRemoval initiates a proposal to remove an agent from the cluster's membership.
 func (c *Cell) ProposeRemoval(ctx context.Context, agentID string) error {
 	key := constants.PeersKey
 	bo := backoff.New()
@@ -354,6 +441,7 @@ func (c *Cell) ProposeRemoval(ctx context.Context, agentID string) error {
 	})
 }
 
+// ApplyMembershipChange updates the local state to reflect a new cluster membership map.
 func (c *Cell) ApplyMembershipChange(value []byte) {
 	var peers map[string]state.PeerInfo
 	if err := json.Unmarshal(value, &peers); err != nil {
@@ -398,7 +486,7 @@ func (c *Cell) refreshPeers(ctx context.Context) {
 	newPeers := make(map[string]PeerClient)
 	var peerList []PeerClient
 
-	for id := range members {
+	for id, info := range members {
 		if id == c.agentID {
 			continue
 		}
@@ -406,9 +494,9 @@ func (c *Cell) refreshPeers(ctx context.Context) {
 			newPeers[id] = p
 			peerList = append(peerList, p)
 		} else if c.peerFactory != nil {
-			if eph, ok := c.ephemeralPeers[id]; ok {
-				glog.Infof("Cell(%s): Creating new client for peer %s at %s", c.agentID, id, eph.GRPCAddr)
-				p, err := c.peerFactory(id, eph.GRPCAddr)
+			if info.GRPCAddr != "" {
+				glog.Infof("Cell(%s): Creating new client for peer %s at %s", c.agentID, id, info.GRPCAddr)
+				p, err := c.peerFactory(id, info.GRPCAddr)
 				if err != nil {
 					glog.Errorf("Cell(%s): Failed to create peer client for %s: %v", c.agentID, id, err)
 					continue
@@ -430,9 +518,10 @@ func (c *Cell) refreshPeers(ctx context.Context) {
 	}
 
 	c.peers = newPeers
-	c.proposer = NewProposer(c.agentID, peerList, c.acceptor)
+	c.proposer = NewProposer(c.agentID, c.ident, peerList, c.acceptor)
 }
 
+// StartSyncLoop periodically triggers synchronization of state with all active peers.
 func (c *Cell) StartSyncLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
@@ -448,6 +537,7 @@ func (c *Cell) StartSyncLoop(ctx context.Context, interval time.Duration) {
 	}()
 }
 
+// StartPingLoop periodically triggers liveness checks and endpoint updates for all active peers.
 func (c *Cell) StartPingLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
@@ -463,6 +553,7 @@ func (c *Cell) StartPingLoop(ctx context.Context, interval time.Duration) {
 	}()
 }
 
+// PingPeers performs a one-off ping to all active peers.
 func (c *Cell) PingPeers(ctx context.Context) {
 	glog.V(3).Infof("Cell(%s): Pinging peers", c.agentID)
 	c.refreshPeers(ctx)
@@ -478,12 +569,24 @@ func (c *Cell) PingPeers(ctx context.Context) {
 		nonce := uuid.New().String()
 		pingCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
 		glog.V(3).Infof("Cell(%s): Pinging peer %s", c.agentID, p.AgentID())
-		resp, err := p.Ping(pingCtx, &paxosv1.PingRequest{
+		req := &paxosv1.PingRequest{
 			AgentId:  c.agentID,
 			Nonce:    nonce,
 			HostPort: c.selfGRPCAddr,
 			HttpUrl:  c.selfHTTPURL,
-		})
+		}
+
+		if c.ident != nil {
+			sig, cert, err := c.ident.SignMessage(req)
+			if err == nil {
+				req.Auth = &paxosv1.Authentication{
+					Signature:   sig,
+					Certificate: cert,
+				}
+			}
+		}
+
+		resp, err := p.Ping(pingCtx, req)
 		cancel()
 		if err != nil {
 			glog.Warningf("Cell(%s): Peer %s is not responding: %v. Proposing removal.", c.agentID, p.AgentID(), err)
@@ -491,12 +594,23 @@ func (c *Cell) PingPeers(ctx context.Context) {
 				glog.Errorf("Cell(%s): Failed to propose removal of peer %s: %v", c.agentID, p.AgentID(), err)
 			}
 		} else {
-			// Update ephemeral map from response
-			c.UpdateEphemeralPeer(resp.AgentId, resp.HostPort, resp.HttpUrl)
+			// Update membership with the latest address info from Ping response
+			members, err := c.store.GetMembers()
+			if err == nil {
+				if info, ok := members[resp.AgentId]; ok {
+					if info.GRPCAddr != resp.HostPort || info.HTTPURL != resp.HttpUrl {
+						info.GRPCAddr = resp.HostPort
+						info.HTTPURL = resp.HttpUrl
+						c.ProposeMembership(context.Background(), resp.AgentId, info)
+					}
+				}
+			}
 		}
 	}
 }
 
+// SyncWithPeers exchanges version information with peers and downloads updated data if
+// a peer has a more recent version of any key.
 func (c *Cell) SyncWithPeers(ctx context.Context) {
 	c.refreshPeers(ctx)
 
@@ -514,11 +628,23 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 	}
 
 	for _, p := range peers {
-		resp, err := p.Sync(ctx, &paxosv1.SyncRequest{
+		req := &paxosv1.SyncRequest{
 			AgentId:  c.agentID,
 			HostPort: c.selfGRPCAddr,
 			HttpUrl:  c.selfHTTPURL,
-		})
+		}
+
+		if c.ident != nil {
+			sig, cert, err := c.ident.SignMessage(req)
+			if err == nil {
+				req.Auth = &paxosv1.Authentication{
+					Signature:   sig,
+					Certificate: cert,
+				}
+			}
+		}
+
+		resp, err := p.Sync(ctx, req)
 		if err != nil {
 			continue
 		}
@@ -541,8 +667,21 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 	}
 }
 
+// CatchUp fetches the latest value of a specific key from a peer and applies it locally.
 func (c *Cell) CatchUp(ctx context.Context, p PeerClient, key string) {
-	resp, err := p.GetKVEntry(ctx, &paxosv1.GetKVEntryRequest{Key: key})
+	req := &paxosv1.GetKVEntryRequest{Key: key}
+
+	if c.ident != nil {
+		sig, cert, err := c.ident.SignMessage(req)
+		if err == nil {
+			req.Auth = &paxosv1.Authentication{
+				Signature:   sig,
+				Certificate: cert,
+			}
+		}
+	}
+
+	resp, err := p.GetKVEntry(ctx, req)
 	if err != nil {
 		glog.Errorf("Cell(%s): Failed to get KV entry %s from %s: %v", c.agentID, key, p.AgentID(), err)
 		return
@@ -566,6 +705,7 @@ func (c *Cell) CatchUp(ctx context.Context, p PeerClient, key string) {
 	}
 }
 
+// GetSyncState retrieves a map of all keys and their highest known consensus version numbers.
 func (c *Cell) GetSyncState() (map[string]uint64, error) {
 	keys, err := c.store.GetKVState()
 	if err != nil {
@@ -590,6 +730,7 @@ func (c *Cell) GetStore() *state.Store {
 	return c.store
 }
 
+// StartEndpointSyncLoop periodically requests updated endpoints for missing peers from active peers.
 func (c *Cell) StartEndpointSyncLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
@@ -616,11 +757,11 @@ func (c *Cell) syncMissingEndpoints(ctx context.Context) {
 	var missing []string
 	var knownPeers []PeerClient
 
-	for id := range members {
+	for id, info := range members {
 		if id == c.agentID {
 			continue
 		}
-		if _, ok := c.ephemeralPeers[id]; !ok {
+		if info.GRPCAddr == "" {
 			missing = append(missing, id)
 		}
 		if p, ok := c.peers[id]; ok {
@@ -647,9 +788,21 @@ func (c *Cell) syncMissingEndpoints(ctx context.Context) {
 		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		resp, err := targetPeer.GetPeerEndpoints(reqCtx, &paxosv1.GetPeerEndpointsRequest{
+		req := &paxosv1.GetPeerEndpointsRequest{
 			AgentId: c.agentID,
-		})
+		}
+
+		if c.ident != nil {
+			sig, cert, err := c.ident.SignMessage(req)
+			if err == nil {
+				req.Auth = &paxosv1.Authentication{
+					Signature:   sig,
+					Certificate: cert,
+				}
+			}
+		}
+
+		resp, err := targetPeer.GetPeerEndpoints(reqCtx, req)
 
 		if err != nil {
 			return fmt.Errorf("failed to get endpoints from %s: %w", targetPeer.AgentID(), err)
@@ -658,11 +811,43 @@ func (c *Cell) syncMissingEndpoints(ctx context.Context) {
 		foundAny := false
 		for missingID, info := range resp.Endpoints {
 			if info.HostPort != "" {
-				c.UpdateEphemeralPeer(missingID, info.HostPort, info.HttpUrl)
+				// Discovered via endpoint sync, propose membership update
+				if existing, ok := members[missingID]; ok {
+					existing.GRPCAddr = info.HostPort
+					existing.HTTPURL = info.HttpUrl
+					c.ProposeMembership(context.Background(), missingID, existing)
+				}
 				glog.Infof("Cell(%s): EndpointSync: Discovered endpoints for %s via %s: %s", c.agentID, missingID, targetPeer.AgentID(), info.HostPort)
 				foundAny = true
+
+				c.mu.Lock()
+				delete(c.missedEndpointCount, missingID)
+				c.mu.Unlock()
 			}
 		}
+
+		// Track misses for unresolved peers
+		c.mu.Lock()
+		for _, mID := range missing {
+			if info, ok := members[mID]; ok && info.GRPCAddr == "" {
+				c.missedEndpointCount[mID]++
+				glog.Warningf("Cell(%s): EndpointSync: Missing endpoint for %s (miss count: %d)", c.agentID, mID, c.missedEndpointCount[mID])
+				if c.missedEndpointCount[mID] >= 5 {
+					glog.Errorf("Cell(%s): EndpointSync: Peer %s missed 5 times, proposing removal", c.agentID, mID)
+					// We launch this in a goroutine so it doesn't block the sync loop or fail the current bo.Retry explicitly
+					go func(removeID string) {
+						removeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+						defer cancel()
+						if err := c.ProposeRemoval(removeCtx, removeID); err != nil {
+							glog.Errorf("Cell(%s): Failed to propose removal for dead peer %s: %v", c.agentID, removeID, err)
+						}
+					}(mID)
+					// Reset count to prevent spamming proposals
+					c.missedEndpointCount[mID] = 0
+				}
+			}
+		}
+		c.mu.Unlock()
 
 		if !foundAny {
 			return fmt.Errorf("no missing endpoints were resolved by %s", targetPeer.AgentID())

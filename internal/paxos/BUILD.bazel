@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
@@ -12,11 +14,13 @@ go_library(
     deps = [
         "//internal/backoff",
         "//internal/constants",
+        "//internal/identity",
         "//internal/state",
         "//proto/paxos/v1:paxosv1_go_proto",
         "@com_github_golang_glog//:glog",
         "@com_github_google_uuid//:uuid",
         "@org_golang_google_protobuf//encoding/prototext",
+        "@org_golang_google_protobuf//proto",
     ],
 )
 

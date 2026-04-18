@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package backoff
 
 import (
@@ -10,9 +12,13 @@ import (
 
 // Backoff defines an exponential backoff policy for retrying operations.
 type Backoff struct {
+	// InitialInterval is the initial duration to wait before the first retry.
 	InitialInterval time.Duration
+	// MaxInterval is the upper bound on the backoff duration.
 	MaxInterval     time.Duration
+	// Multiplier is the factor by which the backoff interval increases after each failure.
 	Multiplier      float64
+	// MaxElapsedTime is the maximum total time to spend retrying. If 0, retries indefinitely.
 	MaxElapsedTime  time.Duration
 }
 
