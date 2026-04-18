@@ -80,6 +80,9 @@ jobs:
     needs: [tag, build]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -93,3 +96,9 @@ jobs:
           name: Release ${{ needs.tag.outputs.new_tag }}
           files: artifacts/synod-agent-*
           generate_release_notes: true
+
+      - name: Set up Bazel
+        run: bazel version
+
+      - name: Update pkg.go.dev
+        run: bazel run //tools/ai/ping-pkg-go-dev -- ${{ needs.tag.outputs.new_tag }}
