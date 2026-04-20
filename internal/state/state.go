@@ -431,9 +431,9 @@ type PeerInfo struct {
 	// ShortName is the human-readable name of the peer.
 	ShortName string `json:"short_name"`
 	// GRPCAddr is the gRPC host:port for the peer.
-	GRPCAddr  string `json:"grpc_addr"`
+	GRPCAddr string `json:"grpc_addr"`
 	// HTTPURL is the HTTP dashboard URL for the peer.
-	HTTPURL   string `json:"http_url"`
+	HTTPURL string `json:"http_url"`
 	// Certificate is the DER-encoded X.509 certificate of the peer.
 	Certificate []byte `json:"certificate"`
 }
@@ -589,11 +589,11 @@ func (s *Store) GetKVEntry(key string) (value []byte, valType string, version ui
 // KVEntry represents a single entry in the Key-Value store.
 type KVEntry struct {
 	// Key is the unique identifier for the entry.
-	Key     string
+	Key string
 	// Value is the raw byte content of the entry.
-	Value   []byte
+	Value []byte
 	// Type classifies the entry (e.g., "data", "membership").
-	Type    string
+	Type string
 	// Version is the consensus sequence number for this specific update.
 	Version uint64
 	// Deleted indicates whether this entry is marked as deleted.
@@ -716,19 +716,19 @@ func (s *Store) LogMessage(msgType, sender, receiver string, message, reply []by
 // LogEntry represents a single recorded message exchange.
 type LogEntry struct {
 	// ID is the sequential identifier for the log entry.
-	ID        int64
+	ID int64
 	// Timestamp is the time the message was recorded.
 	Timestamp string
 	// Type classifies the message (e.g., Prepare, Accept).
-	Type      string
+	Type string
 	// Sender is the agent ID that initiated the message.
-	Sender    string
+	Sender string
 	// Receiver is the agent ID that received the message.
-	Receiver  string
+	Receiver string
 	// Message contains a text representation of the request.
-	Message   string
+	Message string
 	// Reply contains a text representation of the response.
-	Reply     string
+	Reply string
 }
 
 // GetRecentMessages retrieves the most recent message log entries up to the specified limit.

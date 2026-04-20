@@ -74,9 +74,9 @@ type Cell struct {
 	acceptor *Acceptor
 	proposer *Proposer
 
-	mu             sync.Mutex
-	peers               map[string]PeerClient
-	peerFactory         PeerFactory
+	mu          sync.Mutex
+	peers       map[string]PeerClient
+	peerFactory PeerFactory
 
 	selfGRPCAddr string
 	selfHTTPURL  string
