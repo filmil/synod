@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"html"
 	"html/template"
 	"net/http"
 	"time"
@@ -53,7 +54,7 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := grpc.NewClient(selfInfo.GRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-danger'>Failed to connect to local gRPC channelz: %v</div>", err))
+		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-danger'>Failed to connect to local gRPC channelz: %v</div>", html.EscapeString(err.Error())))
 		s.renderGRPCStatus(w, data)
 		return
 	}
@@ -64,14 +65,14 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 	// Get Servers
 	servers, err := s.fetchGRPCServers(ctx, client)
 	if err != nil {
-		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-warning'>Failed to get servers: %v</div>", err))
+		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-warning'>Failed to get servers: %s</div>", html.EscapeString(err.Error())))
 	}
 	data.Servers = servers
 
 	// Get Top Channels
 	channels, err := s.fetchGRPCChannels(ctx, client)
 	if err != nil {
-		errMsg := fmt.Sprintf("<div class='alert alert-warning'>Failed to get top channels: %v</div>", err)
+		errMsg := fmt.Sprintf("<div class='alert alert-warning'>Failed to get top channels: %s</div>", html.EscapeString(err.Error()))
 		if data.ErrorMsg != "" {
 			data.ErrorMsg = template.HTML(string(data.ErrorMsg) + errMsg)
 		} else {

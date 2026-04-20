@@ -30,6 +30,18 @@ import (
 	"github.com/golang/glog"
 )
 
+func sanitizeURL(u string) string {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return "#"
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "#"
+	}
+	return u
+}
+
 // OngoingRequest tracks the state of a User API request initiated via the web dashboard.
 type OngoingRequest struct {
 	// ID is a unique identifier for the request.
@@ -410,7 +422,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 		httpLink := ""
 		if info.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", html.EscapeString(sanitizeURL(info.HTTPURL)), html.EscapeString(info.HTTPURL))
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
@@ -487,9 +499,9 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
-		endpoints := fmt.Sprintf("<code>%s</code>", grpcAddr)
+		endpoints := fmt.Sprintf("<code>%s</code>", html.EscapeString(grpcAddr))
 		if info.HTTPURL != "" {
-			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
+			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", html.EscapeString(sanitizeURL(info.HTTPURL)), html.EscapeString(info.HTTPURL))
 		}
 
 		data.Peers = append(data.Peers, Peer{
@@ -579,7 +591,7 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 
 		httpLink := ""
 		if info.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", info.HTTPURL, info.HTTPURL)
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", html.EscapeString(sanitizeURL(info.HTTPURL)), html.EscapeString(info.HTTPURL))
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
