@@ -135,7 +135,7 @@ func (a *UserAPI) ReleaseLock(ctx context.Context, req *paxosv1.ReleaseLockReque
 
 	for i := len(lockPaths) - 1; i >= 0; i-- {
 		lockPath := lockPaths[i]
-			val, _, _, _, _ := a.cell.GetStore().GetKVEntry(lockPath)
+		val, _, _, _, _ := a.cell.GetStore().GetKVEntry(lockPath)
 
 		if val != nil && len(val) > 0 {
 			var currentLock LockData
@@ -146,7 +146,7 @@ func (a *UserAPI) ReleaseLock(ctx context.Context, req *paxosv1.ReleaseLockReque
 					releaseCtx, cancel := context.WithDeadline(ctx, time.Unix(0, currentLock.ExpiresAt))
 					resp, err := a.CompareAndWrite(releaseCtx, lockPath, val, []byte{}, paxos.QuorumAll)
 					cancel()
-					
+
 					if err != nil {
 						return &paxosv1.ReleaseLockResponse{Success: false, Message: fmt.Sprintf("failed to release lock at %s: %v", lockPath, err)}, nil
 					}
@@ -176,7 +176,7 @@ func (a *UserAPI) RenewLock(ctx context.Context, req *paxosv1.RenewLockRequest) 
 	expiresAt := time.Now().Add(duration).UnixNano()
 
 	for _, lockPath := range lockPaths {
-			val, _, _, _, _ := a.cell.GetStore().GetKVEntry(lockPath)
+		val, _, _, _, _ := a.cell.GetStore().GetKVEntry(lockPath)
 
 		if val != nil && len(val) > 0 {
 			var currentLock LockData

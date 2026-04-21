@@ -110,7 +110,7 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 	}
 
 	var resp *paxosv1.AcceptedResponse
-	
+
 	// Execute external validation hook if present
 	if a.validator != nil {
 		if err := a.validator(ctx, req); err != nil {
@@ -120,7 +120,7 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 				Accepted:          false,
 				HighestPromisedId: promisedID,
 			}
-			
+
 			// Log the rejection
 			opts := prototext.MarshalOptions{Multiline: true}
 			reqBytes := []byte(opts.Format(req))

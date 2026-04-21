@@ -14,6 +14,16 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+func formatErrorHTML(format string, args ...any) template.HTML {
+	msg := fmt.Sprintf(format, args...)
+	return template.HTML(fmt.Sprintf("<div class='alert alert-danger'>%s</div>", template.HTMLEscapeString(msg)))
+}
+
+func formatWarningHTML(format string, args ...any) template.HTML {
+	msg := fmt.Sprintf(format, args...)
+	return template.HTML(fmt.Sprintf("<div class='alert alert-warning'>%s</div>", template.HTMLEscapeString(msg)))
+}
+
 func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 	agentID, err := s.store.GetAgentID()
 	if err != nil {
@@ -36,14 +46,14 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 
 	members, err := s.store.GetMembers()
 	if err != nil {
-		data.ErrorMsg = template.HTML("<div class='alert alert-danger'>Failed to retrieve members</div>")
+		data.ErrorMsg = formatErrorHTML("Failed to retrieve members")
 		s.renderGRPCStatus(w, data)
 		return
 	}
 
 	selfInfo, ok := members[agentID]
 	if !ok || selfInfo.GRPCAddr == "" {
-		data.ErrorMsg = template.HTML("<div class='alert alert-danger'>gRPC address not found for self</div>")
+		data.ErrorMsg = formatErrorHTML("gRPC address not found for self")
 		s.renderGRPCStatus(w, data)
 		return
 	}
@@ -51,36 +61,40 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	conn, err := grpc.NewClient(selfInfo.GRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	servers, channels, errorMsg := s.fetchChannelzData(ctx, selfInfo.GRPCAddr)
+	data.Servers = servers
+	data.Channels = channels
+	data.ErrorMsg = errorMsg
+
+	s.renderGRPCStatus(w, data)
+}
+
+func (s *HTTPServer) fetchChannelzData(ctx context.Context, grpcAddr string) ([]GRPCServerData, []GRPCChannelData, template.HTML) {
+	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-danger'>Failed to connect to local gRPC channelz: %v</div>", err))
-		s.renderGRPCStatus(w, data)
-		return
+		return nil, nil, formatErrorHTML("Failed to connect to local gRPC channelz: %v", err)
 	}
 	defer conn.Close()
 
 	client := grpc_channelz_v1.NewChannelzClient(conn)
+	var errorMsg template.HTML
 
-	// Get Servers
 	servers, err := s.fetchGRPCServers(ctx, client)
 	if err != nil {
-		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-warning'>Failed to get servers: %v</div>", err))
+		errorMsg = formatWarningHTML("Failed to get servers: %v", err)
 	}
-	data.Servers = servers
 
-	// Get Top Channels
 	channels, err := s.fetchGRPCChannels(ctx, client)
 	if err != nil {
-		errMsg := fmt.Sprintf("<div class='alert alert-warning'>Failed to get top channels: %v</div>", err)
-		if data.ErrorMsg != "" {
-			data.ErrorMsg = template.HTML(string(data.ErrorMsg) + errMsg)
+		errMsg := formatWarningHTML("Failed to get top channels: %v", err)
+		if errorMsg != "" {
+			errorMsg = template.HTML(string(errorMsg) + string(errMsg))
 		} else {
-			data.ErrorMsg = template.HTML(errMsg)
+			errorMsg = errMsg
 		}
 	}
-	data.Channels = channels
 
-	s.renderGRPCStatus(w, data)
+	return servers, channels, errorMsg
 }
 
 func (s *HTTPServer) renderGRPCStatus(w http.ResponseWriter, data GRPCStatusData) {
