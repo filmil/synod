@@ -3,9 +3,9 @@
 package integration
 
 import (
-	"github.com/filmil/synod/internal/constants"
 	"context"
 	"fmt"
+	"github.com/filmil/synod/internal/constants"
 	"os"
 	"testing"
 	"time"
@@ -79,8 +79,6 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 		agents[0].cell.ProposeMembership(context.Background(), agents[i].id, infoI)
 	}
 
-
-
 	// Wait for all agents to sync up the membership
 	time.Sleep(5 * time.Second)
 
@@ -116,6 +114,5 @@ func TestIntegration_PeerRemovalOnFailure(t *testing.T) {
 	if len(members) != 2 {
 		t.Errorf("Expected 2 members, got %d", len(members))
 	}
-
 
 }

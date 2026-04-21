@@ -16,9 +16,9 @@ type PaxosClient struct {
 	// agentID is the ID of the remote agent.
 	agentID string
 	// client is the underlying gRPC client.
-	client  paxosv1.PaxosServiceClient
+	client paxosv1.PaxosServiceClient
 	// conn is the underlying gRPC connection.
-	conn    *grpc.ClientConn
+	conn *grpc.ClientConn
 }
 
 // NewPaxosClient establishes a connection to the specified address.

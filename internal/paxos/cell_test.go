@@ -3,9 +3,9 @@
 package paxos
 
 import (
-	"github.com/filmil/synod/internal/constants"
 	"context"
 	"encoding/json"
+	"github.com/filmil/synod/internal/constants"
 	"os"
 	"testing"
 	"time"
