@@ -289,7 +289,7 @@ func (c *Cell) Propose(ctx context.Context, key string, value []byte, qt QuorumT
 		// Verify locks before proceeding
 		if c.lockChecker != nil {
 			if err := c.lockChecker(ctx, key); err != nil {
-				return fmt.Errorf("write refused by lock policy: %w", err)
+				return backoff.Permanent(fmt.Errorf("write refused by lock policy: %w", err))
 			}
 		}
 

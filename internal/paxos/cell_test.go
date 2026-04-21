@@ -3,13 +3,15 @@
 package paxos
 
 import (
-	"github.com/filmil/synod/internal/constants"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/filmil/synod/internal/constants"
 	"github.com/filmil/synod/internal/state"
 )
 
@@ -142,5 +144,43 @@ func TestCell_PingPeers(t *testing.T) {
 	}
 	if _, ok := members[peer1ID]; !ok {
 		t.Errorf("Responsive peer %s was incorrectly removed from DB", peer1ID)
+	}
+}
+
+func TestCell_Propose_LockCheckerError(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "cell-lock-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	store, err := state.NewStore(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+	defer store.Close()
+
+	agentID := "agent-1"
+	acceptor := NewAcceptor(agentID, nil, store)
+
+	cell := NewCell(agentID, store, nil, acceptor, nil, "localhost:50051", "http://localhost:8080")
+
+	// Set a lock checker that always returns an error
+	mockErr := fmt.Errorf("mock lock error")
+	cell.SetLockChecker(func(ctx context.Context, key string) error {
+		return mockErr
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err = cell.Propose(ctx, "/test-key", []byte("test-value"), QuorumMajority)
+	if err == nil {
+		t.Fatalf("expected error from Propose due to lock checker, got nil")
+	}
+
+	expectedErrMsg := "write refused by lock policy"
+	if !strings.Contains(err.Error(), expectedErrMsg) {
+		t.Errorf("expected error containing %q, got: %v", expectedErrMsg, err)
 	}
 }
