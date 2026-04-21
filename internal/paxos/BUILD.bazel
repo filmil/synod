@@ -20,7 +20,6 @@ go_library(
         "@com_github_golang_glog//:glog",
         "@com_github_google_uuid//:uuid",
         "@org_golang_google_protobuf//encoding/prototext",
-        "@org_golang_google_protobuf//proto",
     ],
 )
 
