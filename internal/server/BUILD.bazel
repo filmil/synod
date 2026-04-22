@@ -11,8 +11,8 @@ go_library(
         "http_server.go",
         "listen.go",
     ],
-    embedsrcs = glob(["templates/*.html"]),
     data = ["//third_party/bootstrap"],
+    embedsrcs = glob(["templates/*.html"]),
     importpath = "github.com/filmil/synod/internal/server",
     visibility = ["//visibility:public"],
     deps = [
@@ -34,7 +34,10 @@ go_library(
 
 go_test(
     name = "server_test",
-    srcs = ["http_server_test.go"],
+    srcs = [
+        "http_server_test.go",
+        "listen_test.go",
+    ],
     embed = [":server"],
     deps = [
         "//internal/paxos",

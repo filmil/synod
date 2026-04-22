@@ -3,11 +3,11 @@
 package main
 
 import (
-	"github.com/filmil/synod/internal/constants"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/filmil/synod/internal/constants"
 	"os"
 	"path/filepath"
 	"time"
@@ -24,12 +24,12 @@ import (
 )
 
 var (
-	stateDir     = flag.String("state_dir", "", "Directory for state files (required)")
-	grpcAddr     = flag.String("grpc_addr", ":50051", "gRPC address to listen on")
-	httpAddr     = flag.String("http_addr", ":8080", "HTTP address to listen on")
-	peerAddr     = flag.String("peer", "", "Address of an existing peer to join the cell")
-	pingInterval = flag.Duration("ping_interval", 2*time.Minute, "Interval to ping peers")
-	identityPass = flag.String("identity_passphrase", "", "Passphrase for the agent's private key")
+	stateDir        = flag.String("state_dir", "", "Directory for state files (required)")
+	grpcAddr        = flag.String("grpc_addr", ":50051", "gRPC address to listen on")
+	httpAddr        = flag.String("http_addr", ":8080", "HTTP address to listen on")
+	peerAddr        = flag.String("peer", "", "Address of an existing peer to join the cell")
+	pingInterval    = flag.Duration("ping_interval", 2*time.Minute, "Interval to ping peers")
+	identityPass    = flag.String("identity_passphrase", "", "Passphrase for the agent's private key")
 	trustedCertsDir = flag.String("trusted_certs_dir", "", "Directory containing trusted peer certificates")
 )
 
@@ -103,7 +103,7 @@ func main() {
 	acceptor := paxos.NewAcceptor(agentID, ident, store)
 	cell := paxos.NewCell(agentID, store, ident, acceptor, peerFactory, finalGrpcAddr, fmt.Sprintf("http://%s", httpLis.Addr().String()))
 	paxosSrv := server.NewPaxosServer(agentID, ident, store, acceptor, cell)
-	
+
 	// Create userAPI and inject the lock checking logic into the cell
 	uAPI := userapi.New(cell)
 	cell.SetLockChecker(func(ctx context.Context, key string) error {
@@ -194,11 +194,11 @@ func main() {
 					glog.Errorf("Failed to unmarshal certificate %s: %v", path, err)
 					continue
 				}
-				
+
 				// Deriving agent ID from cert
 				identHelper := &identity.Identity{Certificate: cert}
 				peerID := identHelper.AgentID()
-				
+
 				if peerID != agentID {
 					glog.Infof("Trusting peer %s from certificate %s", peerID, entry.Name())
 					store.AddMember(peerID, state.PeerInfo{
@@ -347,12 +347,12 @@ func main() {
 		}
 	}()
 
-	glog.Infof("\n\nSynod agent is up and running\n" +
-		"--------------------------------------------------\n" +
-		"Agent ID:   %s\n" +
-		"Short Name: %s\n" +
-		"gRPC Addr:  %s\n" +
-		"HTTP URL:   http://%s\n" +
+	glog.Infof("\n\nSynod agent is up and running\n"+
+		"--------------------------------------------------\n"+
+		"Agent ID:   %s\n"+
+		"Short Name: %s\n"+
+		"gRPC Addr:  %s\n"+
+		"HTTP URL:   http://%s\n"+
 		"--------------------------------------------------\n",
 		agentID, shortName, finalGrpcAddr, httpLis.Addr().String())
 

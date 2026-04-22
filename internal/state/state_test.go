@@ -122,10 +122,10 @@ func TestValidateKey(t *testing.T) {
 		{"/foo/bar", false},
 		{"/", false},
 		{"/_internal/peers", false},
-		{"foo", true},       // No leading slash
-		{"/foo/./bar", true}, // Dot segment
+		{"foo", true},         // No leading slash
+		{"/foo/./bar", true},  // Dot segment
 		{"/foo/../bar", true}, // Dot-dot segment
-		{"/foo//bar", true},  // Empty segment
+		{"/foo//bar", true},   // Empty segment
 		{"/foo/", false},      // Trailing slash (allowed but maybe we should decide)
 	}
 

@@ -209,7 +209,7 @@ func TestProposer_FastForwardNextNum(t *testing.T) {
 	}
 
 	_, err = p.Propose(ctx, "/test/key", []byte("val"), QuorumMajority)
-	
+
 	// Phase 1 should fail because peer-1 rejected and quorum is 2
 	if err == nil {
 		t.Fatalf("Expected Propose to fail due to lack of quorum")

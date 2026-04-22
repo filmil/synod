@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "state",
@@ -14,8 +14,6 @@ go_library(
         "@com_github_mattn_go_sqlite3//:go-sqlite3",
     ],
 )
-
-load("@rules_go//go:def.bzl", "go_test")
 
 go_test(
     name = "state_test",

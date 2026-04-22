@@ -3,9 +3,9 @@
 package server
 
 import (
-	"time"
 	"context"
 	"net"
+	"time"
 
 	"github.com/filmil/synod/internal/identity"
 	"github.com/filmil/synod/internal/paxos"
@@ -94,7 +94,7 @@ func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterR
 		Certificate: cert,
 	}
 	err := s.cell.ProposeMembership(ctx, req.AgentId, info)
-	
+
 	resp := &paxosv1.JoinClusterResponse{
 		AgentId: s.agentID,
 		Success: err == nil,
@@ -376,7 +376,6 @@ func (s *PaxosServer) ReadPrefix(ctx context.Context, req *paxosv1.ReadPrefixReq
 	return resp, nil
 }
 
-
 // AcquireLock handles a client request to acquire a distributed lock.
 func (s *PaxosServer) AcquireLock(ctx context.Context, req *paxosv1.AcquireLockRequest) (*paxosv1.AcquireLockResponse, error) {
 	return s.userAPI.AcquireLock(ctx, req)
@@ -395,7 +394,6 @@ func (s *PaxosServer) RenewLock(ctx context.Context, req *paxosv1.RenewLockReque
 func (s *PaxosServer) Shutdown(ctx context.Context, req *paxosv1.ShutdownRequest) (*paxosv1.ShutdownResponse, error) {
 	return s.userAPI.Shutdown(ctx, req)
 }
-
 
 func timeoutInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	ctx, cancel := context.WithTimeout(ctx, 1*time.Minute)

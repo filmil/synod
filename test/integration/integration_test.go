@@ -3,9 +3,9 @@
 package integration
 
 import (
-	"github.com/filmil/synod/internal/constants"
 	"context"
 	"fmt"
+	"github.com/filmil/synod/internal/constants"
 	"io"
 	"net/http"
 	"os"
@@ -15,8 +15,8 @@ import (
 
 	"github.com/filmil/synod/internal/paxos"
 	"github.com/filmil/synod/internal/server"
-	"github.com/filmil/synod/internal/userapi"
 	"github.com/filmil/synod/internal/state"
+	"github.com/filmil/synod/internal/userapi"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"github.com/golang/glog"
 )
@@ -134,8 +134,6 @@ func TestIntegration_5Agents(t *testing.T) {
 		}
 		cancel()
 	}
-
-
 
 	// Wait for all agents to sync up the membership
 	time.Sleep(5 * time.Second)
