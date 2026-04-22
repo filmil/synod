@@ -409,7 +409,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 		httpLink := ""
 		if info.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", html.EscapeString(info.HTTPURL), html.EscapeString(info.HTTPURL))
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", sanitizeURL(info.HTTPURL), html.EscapeString(info.HTTPURL))
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
@@ -488,7 +488,7 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		endpoints := fmt.Sprintf("<code>%s</code>", html.EscapeString(grpcAddr))
 		if info.HTTPURL != "" {
-			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", html.EscapeString(info.HTTPURL), html.EscapeString(info.HTTPURL))
+			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", sanitizeURL(info.HTTPURL), html.EscapeString(info.HTTPURL))
 		}
 
 		data.Peers = append(data.Peers, Peer{
@@ -578,7 +578,7 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 
 		httpLink := ""
 		if info.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", html.EscapeString(info.HTTPURL), html.EscapeString(info.HTTPURL))
+			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", sanitizeURL(info.HTTPURL), html.EscapeString(info.HTTPURL))
 		} else {
 			httpLink = "<span class=\"text-muted\">N/A</span>"
 		}
@@ -1011,6 +1011,18 @@ func (s *HTTPServer) handleUserAPILockRenew(w http.ResponseWriter, r *http.Reque
 // maybeJSONToTable attempts to parse a string/byte slice as JSON.
 // If it's a valid JSON object or array, it renders it as a nested HTML table.
 // Otherwise, it returns the content wrapped in standard <pre><code> blocks.
+
+func sanitizeURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "#"
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "#"
+	}
+	return rawURL
+}
+
 func maybeJSONToTable(data []byte) string {
 	if len(data) == 0 {
 		return ""
