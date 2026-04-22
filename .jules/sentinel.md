@@ -7,3 +7,8 @@
 **Vulnerability:** Reflected XSS vulnerabilities existed where unescaped strings retrieved from remote nodes (like `err.Error()`, `info.HTTPURL`, `grpcAddr`, `info.ShortName`) were injected directly into HTML string layouts via `fmt.Sprintf` and then wrapped with `template.HTML`, bypassing HTML escaping protections.
 **Learning:** This occurred because `html/template` only automatically escapes standard string insertions (`{{.}}`), and manual `template.HTML` casting explicitly disables escaping for anything passed to it. Directly formatted HTML strings using `fmt.Sprintf` and `template.HTML` must manually escape untrusted inputs.
 **Prevention:** Always wrap untrusted external string data with `html.EscapeString()` *before* combining it into an HTML template string payload utilizing `fmt.Sprintf` intended for a `template.HTML` cast.
+
+## 2025-04-22 - Fix XSS via URL manipulation
+**Vulnerability:** Even if an HTTP URL was checked for a valid scheme via `url.Parse` to prevent `javascript:` XSS payloads, returning the `rawURL` string as it was passed in meant it could still contain double quotes. When injected directly into `href="%s"` via `fmt.Sprintf` this would allow an attacker to breakout of the attribute and inject an `onmouseover` event.
+**Learning:** Checking the scheme is not enough; if an attacker can manipulate the query parameters or hash to contain a double quote, they can still perform attribute breakout XSS if the value is unescaped and injected via `fmt.Sprintf`.
+**Prevention:** Always use `u.String()` on parsed URLs to return the properly normalized, url-encoded form. Always wrap the entire url variable with `html.EscapeString()` *before* interpolating into a `template.HTML` cast.
