@@ -99,6 +99,7 @@ func (s *HTTPServer) fetchGRPCServers(ctx context.Context, client grpc_channelz_
 
 	var servers []GRPCServerData
 	if resp != nil {
+		servers = make([]GRPCServerData, 0, len(resp.Server))
 		for _, srv := range resp.Server {
 			var started, succeeded, failed int64
 			var lastCall string
@@ -130,6 +131,7 @@ func (s *HTTPServer) fetchGRPCChannels(ctx context.Context, client grpc_channelz
 
 	var channels []GRPCChannelData
 	if resp != nil {
+		channels = make([]GRPCChannelData, 0, len(resp.Channel))
 		for _, ch := range resp.Channel {
 			var state, target string
 			var started, succeeded, failed int64
