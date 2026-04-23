@@ -3,8 +3,10 @@
 package server
 
 import (
+	"errors"
 	"net"
 	"testing"
+	"time"
 )
 
 func TestListenWithRetry_Success(t *testing.T) {
@@ -43,5 +45,41 @@ func TestListenWithRetry_Occupied(t *testing.T) {
 	newAddr := newLis.Addr().String()
 	if newAddr == occupiedAddr {
 		t.Errorf("ListenWithRetry returned the same occupied address: %v", newAddr)
+	}
+}
+
+func TestListenWithRetry_Exhaustion(t *testing.T) {
+	// Save the original values and restore them after the test.
+	origNetListen := netListen
+	origBackoffMaxTime := backoffMaxTime
+	origBackoffInitial := backoffInitial
+	origBackoffMaxInterval := backoffMaxInterval
+	defer func() {
+		netListen = origNetListen
+		backoffMaxTime = origBackoffMaxTime
+		backoffInitial = origBackoffInitial
+		backoffMaxInterval = origBackoffMaxInterval
+	}()
+
+	// Mock netListen to always fail
+	netListen = func(network, address string) (net.Listener, error) {
+		return nil, errors.New("mock listen error")
+	}
+
+	// Reduce backoff parameters to make the test run quickly
+	backoffMaxTime = 10 * time.Millisecond
+	backoffInitial = 1 * time.Millisecond
+	backoffMaxInterval = 2 * time.Millisecond
+
+	lis, err := ListenWithRetry("127.0.0.1:0")
+	if err == nil {
+		if lis != nil {
+			lis.Close()
+		}
+		t.Fatalf("expected ListenWithRetry to fail due to timeout, but it succeeded")
+	}
+
+	if lis != nil {
+		t.Errorf("expected listener to be nil on error, got %v", lis)
 	}
 }
