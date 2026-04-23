@@ -2,6 +2,8 @@
 
 [![Build and Test](https://github.com/filmil/synod/actions/workflows/build-test.yml/badge.svg)](https://github.com/filmil/synod/actions/workflows/build-test.yml)
 [![Release Agent](https://github.com/filmil/synod/actions/workflows/release.yml/badge.svg)](https://github.com/filmil/synod/actions/workflows/release.yml)
+[![Publish to my Bazel registry](https://github.com/filmil/synod/actions/workflows/publish.yml/badge.svg)](https://github.com/filmil/synod/actions/workflows/publish.yml)
+[![Publish on Bazel Central Registry](https://github.com/filmil/synod/actions/workflows/publish-bcr.yml/badge.svg)](https://github.com/filmil/synod/actions/workflows/publish-bcr.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/filmil/synod.svg)](https://pkg.go.dev/github.com/filmil/synod)
 
 ## What it does

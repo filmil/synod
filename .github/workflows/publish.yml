@@ -1,0 +1,25 @@
+name: Publish to my Bazel registry
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Bazel
+        uses: bazelbuild/setup-bazelisk@v2
+
+      - name: Publish to registry
+        env:
+          BAZEL_REGISTRY_TOKEN: ${{ secrets.BAZEL_REGISTRY_TOKEN }}
+        run: |
+          bazel run //.bcr:publish -- \
+            --registry_url=https://bazel.filmil.org \
+            --token="$BAZEL_REGISTRY_TOKEN"

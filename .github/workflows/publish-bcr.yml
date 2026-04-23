@@ -1,0 +1,27 @@
+name: Publish on Bazel Central Registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The version to publish (e.g., 0.1.0)'
+        required: true
+
+jobs:
+  publish-bcr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Bazel
+        uses: bazelbuild/setup-bazelisk@v2
+
+      - name: Publish to BCR
+        env:
+          GH_TOKEN: ${{ secrets.BCR_PUBLISH_TOKEN }}
+        run: |
+          bazel run //.bcr:publish -- \
+            --registry_url=https://github.com/bazelbuild/bazel-central-registry \
+            --version="${{ github.event.inputs.version }}" \
+            --token="$GH_TOKEN"
