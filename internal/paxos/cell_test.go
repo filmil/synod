@@ -5,6 +5,7 @@ package paxos
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -167,7 +168,9 @@ func TestCell_Propose_LockCheckerError(t *testing.T) {
 
 	// Set a lock checker that always returns an error
 	mockErr := fmt.Errorf("mock lock error")
+	callCount := 0
 	cell.SetLockChecker(func(ctx context.Context, key string) error {
+		callCount++
 		return mockErr
 	})
 
@@ -182,5 +185,13 @@ func TestCell_Propose_LockCheckerError(t *testing.T) {
 	expectedErrMsg := "write refused by lock policy"
 	if !strings.Contains(err.Error(), expectedErrMsg) {
 		t.Errorf("expected error containing %q, got: %v", expectedErrMsg, err)
+	}
+
+	if !errors.Is(err, mockErr) {
+		t.Errorf("expected error to wrap mockErr, got: %v", err)
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected lock checker to be called exactly once, got %d. This indicates backoff.Permanent is not preventing retries.", callCount)
 	}
 }
