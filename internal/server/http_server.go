@@ -301,6 +301,16 @@ func (s *HTTPServer) completeOngoingRequest(id string, success bool, result stri
 	}
 }
 
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Run starts the HTTP server on the provided listener.
 func (s *HTTPServer) Run(lis net.Listener) error {
 	mux := http.NewServeMux()
@@ -346,7 +356,7 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 		http.ServeFile(w, r, path)
 	})
 
-	return http.Serve(lis, mux)
+	return http.Serve(lis, withSecurityHeaders(mux))
 }
 
 func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
