@@ -119,15 +119,7 @@ func main() {
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			req := &paxosv1.GetKVEntryRequest{Key: constants.PeersKey}
-			if ident != nil {
-				sig, cert, err := ident.SignMessage(req)
-				if err == nil {
-					req.Auth = &paxosv1.Authentication{
-						Signature:   sig,
-						Certificate: cert,
-					}
-				}
-			}
+			ident.Authenticate(req)
 			kvResp, err := joinClient.GetKVEntry(ctx, req)
 			cancel()
 			if err == nil && kvResp.Value != nil {
@@ -231,15 +223,7 @@ func main() {
 					HttpUrl:   fmt.Sprintf("http://%s", httpLis.Addr().String()),
 				}
 
-				if ident != nil {
-					sig, cert, err := ident.SignMessage(req)
-					if err == nil {
-						req.Auth = &paxosv1.Authentication{
-							Signature:   sig,
-							Certificate: cert,
-						}
-					}
-				}
+				ident.Authenticate(req)
 
 				resp, err := joinClient.JoinCluster(ctx, req)
 
@@ -273,15 +257,7 @@ func main() {
 				// Download the consensus value of the list of peers
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				req := &paxosv1.GetKVEntryRequest{Key: constants.PeersKey}
-				if ident != nil {
-					sig, cert, err := ident.SignMessage(req)
-					if err == nil {
-						req.Auth = &paxosv1.Authentication{
-							Signature:   sig,
-							Certificate: cert,
-						}
-					}
-				}
+				ident.Authenticate(req)
 				kvResp, err := joinClient.GetKVEntry(ctx, req)
 				cancel()
 				if err != nil {

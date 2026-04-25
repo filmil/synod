@@ -238,3 +238,34 @@ func VerifyMessage(cert *x509.Certificate, msg proto.Message, signature []byte) 
 
 	return Verify(cert, data, signature)
 }
+
+// Authenticate signs the given message and sets its 'auth' field if it exists.
+func (i *Identity) Authenticate(msg proto.Message) {
+	if i == nil {
+		return
+	}
+	sig, cert, err := i.SignMessage(msg)
+	if err != nil {
+		return
+	}
+
+	m := msg.ProtoReflect()
+	descriptor := m.Descriptor()
+	authField := descriptor.Fields().ByName("auth")
+	if authField == nil || authField.Kind() != protoreflect.MessageKind {
+		return
+	}
+
+	authMsg := m.Mutable(authField).Message()
+	authDescriptor := authMsg.Descriptor()
+
+	sigField := authDescriptor.Fields().ByName("signature")
+	if sigField != nil {
+		authMsg.Set(sigField, protoreflect.ValueOfBytes(sig))
+	}
+
+	certField := authDescriptor.Fields().ByName("certificate")
+	if certField != nil {
+		authMsg.Set(certField, protoreflect.ValueOfBytes(cert))
+	}
+}

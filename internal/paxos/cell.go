@@ -180,15 +180,7 @@ func (c *Cell) pingNode(ctx context.Context, id string, info state.PeerInfo) err
 		HttpUrl:  c.selfHTTPURL,
 	}
 
-	if c.ident != nil {
-		sig, cert, err := c.ident.SignMessage(req)
-		if err == nil {
-			req.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	c.ident.Authenticate(req)
 
 	_, err := client.Ping(pingCtx, req)
 	return err
@@ -576,15 +568,7 @@ func (c *Cell) PingPeers(ctx context.Context) {
 			HttpUrl:  c.selfHTTPURL,
 		}
 
-		if c.ident != nil {
-			sig, cert, err := c.ident.SignMessage(req)
-			if err == nil {
-				req.Auth = &paxosv1.Authentication{
-					Signature:   sig,
-					Certificate: cert,
-				}
-			}
-		}
+		c.ident.Authenticate(req)
 
 		resp, err := p.Ping(pingCtx, req)
 		cancel()
@@ -634,15 +618,7 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 			HttpUrl:  c.selfHTTPURL,
 		}
 
-		if c.ident != nil {
-			sig, cert, err := c.ident.SignMessage(req)
-			if err == nil {
-				req.Auth = &paxosv1.Authentication{
-					Signature:   sig,
-					Certificate: cert,
-				}
-			}
-		}
+		c.ident.Authenticate(req)
 
 		resp, err := p.Sync(ctx, req)
 		if err != nil {
@@ -671,15 +647,7 @@ func (c *Cell) SyncWithPeers(ctx context.Context) {
 func (c *Cell) CatchUp(ctx context.Context, p PeerClient, key string) {
 	req := &paxosv1.GetKVEntryRequest{Key: key}
 
-	if c.ident != nil {
-		sig, cert, err := c.ident.SignMessage(req)
-		if err == nil {
-			req.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	c.ident.Authenticate(req)
 
 	resp, err := p.GetKVEntry(ctx, req)
 	if err != nil {
@@ -792,15 +760,7 @@ func (c *Cell) syncMissingEndpoints(ctx context.Context) {
 			AgentId: c.agentID,
 		}
 
-		if c.ident != nil {
-			sig, cert, err := c.ident.SignMessage(req)
-			if err == nil {
-				req.Auth = &paxosv1.Authentication{
-					Signature:   sig,
-					Certificate: cert,
-				}
-			}
-		}
+		c.ident.Authenticate(req)
 
 		resp, err := targetPeer.GetPeerEndpoints(reqCtx, req)
 
