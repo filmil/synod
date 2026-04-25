@@ -768,11 +768,14 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 	} else if resultMsg := r.URL.Query().Get("result"); resultMsg != "" {
 		statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert">Read Result: <code>%s</code></div>`, html.EscapeString(resultMsg))
 	} else if prefixResult := r.URL.Query().Get("prefix_result"); prefixResult != "" {
-		type entry struct {
+		// PrefixResEntry is used to unmarshal the prefix read results.
+		// We use string instead of template.HTML for Value to ensure that
+		// html/template automatically escapes any malicious content.
+		type PrefixResEntry struct {
 			Key   string `json:"key"`
 			Value string `json:"value"`
 		}
-		var resEntries []entry
+		var resEntries []PrefixResEntry
 		if err := json.Unmarshal([]byte(prefixResult), &resEntries); err != nil {
 			// Fallback if not valid JSON (e.g. error message)
 			statusMsg = fmt.Sprintf(`<div class="alert alert-info mb-4" role="alert"><h6 class="alert-heading">Prefix Read Result:</h6>%s</div>`, html.EscapeString(prefixResult))
@@ -864,14 +867,16 @@ func (s *HTTPServer) handleUserAPIReadPrefix(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Format results as JSON
-	type entry struct {
+	// Format results as JSON. Using a dedicated struct with string values
+	// ensures that the dashboard correctly escapes any HTML content
+	// when it is later unmarshaled and rendered.
+	type PrefixResEntry struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
 	}
-	var resEntries []entry
+	var resEntries []PrefixResEntry
 	for _, e := range resp.Entries {
-		resEntries = append(resEntries, entry{
+		resEntries = append(resEntries, PrefixResEntry{
 			Key:   e.Key,
 			Value: string(e.Value),
 		})
