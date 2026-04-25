@@ -106,15 +106,7 @@ func (s *PaxosServer) JoinCluster(ctx context.Context, req *paxosv1.JoinClusterR
 		resp.Message = "Join accepted"
 	}
 
-	if s.ident != nil {
-		sig, cert, err := s.ident.SignMessage(resp)
-		if err == nil {
-			resp.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	s.ident.Authenticate(resp)
 
 	return resp, nil
 }
@@ -150,15 +142,7 @@ func (s *PaxosServer) Sync(ctx context.Context, req *paxosv1.SyncRequest) (*paxo
 		Keys:    keys,
 	}
 
-	if s.ident != nil {
-		sig, cert, err := s.ident.SignMessage(resp)
-		if err == nil {
-			resp.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	s.ident.Authenticate(resp)
 
 	return resp, nil
 }
@@ -185,15 +169,7 @@ func (s *PaxosServer) GetKVEntry(ctx context.Context, req *paxosv1.GetKVEntryReq
 		Version: propNum,
 	}
 
-	if s.ident != nil {
-		sig, cert, err := s.ident.SignMessage(resp)
-		if err == nil {
-			resp.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	s.ident.Authenticate(resp)
 
 	return resp, nil
 }
@@ -233,15 +209,7 @@ func (s *PaxosServer) Ping(ctx context.Context, req *paxosv1.PingRequest) (*paxo
 		HttpUrl:  httpUrl,
 	}
 
-	if s.ident != nil {
-		sig, cert, err := s.ident.SignMessage(resp)
-		if err == nil {
-			resp.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	s.ident.Authenticate(resp)
 
 	return resp, nil
 }
@@ -271,15 +239,7 @@ func (s *PaxosServer) GetPeerEndpoints(ctx context.Context, req *paxosv1.GetPeer
 		}
 	}
 
-	if s.ident != nil {
-		sig, cert, err := s.ident.SignMessage(resp)
-		if err == nil {
-			resp.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	s.ident.Authenticate(resp)
 
 	return resp, nil
 }
@@ -300,15 +260,7 @@ func (s *PaxosServer) Read(ctx context.Context, req *paxosv1.ReadRequest) (*paxo
 		return nil, err
 	}
 
-	if s.ident != nil {
-		sig, cert, err := s.ident.SignMessage(resp)
-		if err == nil {
-			resp.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	s.ident.Authenticate(resp)
 
 	return resp, nil
 }
@@ -333,15 +285,7 @@ func (s *PaxosServer) CompareAndWrite(ctx context.Context, req *paxosv1.CompareA
 		return nil, err
 	}
 
-	if s.ident != nil {
-		sig, cert, err := s.ident.SignMessage(resp)
-		if err == nil {
-			resp.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	s.ident.Authenticate(resp)
 
 	return resp, nil
 }
@@ -363,15 +307,7 @@ func (s *PaxosServer) ReadPrefix(ctx context.Context, req *paxosv1.ReadPrefixReq
 		return nil, err
 	}
 
-	if s.ident != nil {
-		sig, cert, err := s.ident.SignMessage(resp)
-		if err == nil {
-			resp.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	s.ident.Authenticate(resp)
 
 	return resp, nil
 }

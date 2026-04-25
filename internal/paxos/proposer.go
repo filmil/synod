@@ -159,15 +159,7 @@ func (p *Proposer) sendPrepare(ctx context.Context, key string, id *paxosv1.Prop
 		Nonce:      nonce,
 	}
 
-	if p.ident != nil {
-		sig, cert, err := p.ident.SignMessage(req)
-		if err == nil {
-			req.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	p.ident.Authenticate(req)
 
 	// Prepare self
 	resp, err := p.acceptor.Prepare(ctx, req)
@@ -217,15 +209,7 @@ func (p *Proposer) sendAccept(ctx context.Context, key string, id *paxosv1.Propo
 		Nonce:      nonce,
 	}
 
-	if p.ident != nil {
-		sig, cert, err := p.ident.SignMessage(req)
-		if err == nil {
-			req.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	p.ident.Authenticate(req)
 
 	// Accept self
 	resp, err := p.acceptor.Accept(ctx, req)

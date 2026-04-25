@@ -76,15 +76,7 @@ func (a *Acceptor) Prepare(ctx context.Context, req *paxosv1.PrepareRequest) (*p
 		}
 	}
 
-	if a.ident != nil {
-		sig, cert, err := a.ident.SignMessage(resp)
-		if err == nil {
-			resp.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	a.ident.Authenticate(resp)
 
 	// Log the message
 	opts := prototext.MarshalOptions{Multiline: true}
@@ -153,15 +145,7 @@ func (a *Acceptor) Accept(ctx context.Context, req *paxosv1.AcceptRequest) (*pax
 		}
 	}
 
-	if a.ident != nil {
-		sig, cert, err := a.ident.SignMessage(resp)
-		if err == nil {
-			resp.Auth = &paxosv1.Authentication{
-				Signature:   sig,
-				Certificate: cert,
-			}
-		}
-	}
+	a.ident.Authenticate(resp)
 
 	// Log the message
 	opts := prototext.MarshalOptions{Multiline: true}
