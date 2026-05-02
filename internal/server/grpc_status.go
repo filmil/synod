@@ -21,18 +21,15 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
 	}
-	shortName, err := s.store.GetShortName()
+
+	base, err := s.prepareBaseData("gRPC Introspection", "grpc")
 	if err != nil {
-		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
+		http.Error(w, "Failed to prepare base data", http.StatusInternalServerError)
 		return
 	}
 
 	data := GRPCStatusData{
-		BaseData: BaseData{
-			Title:     "gRPC Introspection",
-			AgentName: shortName,
-			ActiveNav: "grpc",
-		},
+		BaseData: base,
 	}
 
 	members, err := s.store.GetMembers()
