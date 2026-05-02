@@ -360,22 +360,10 @@ func (s *HTTPServer) Run(lis net.Listener) error {
 	return http.Serve(lis, withSecurityHeaders(mux))
 }
 
-func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
-	agentID, err := s.store.GetAgentID()
-	if err != nil {
-		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
-		return
-	}
-	shortName, err := s.store.GetShortName()
-	if err != nil {
-		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
-		return
-	}
-
+func (s *HTTPServer) getConsensusMembers() (map[string]state.PeerInfo, error) {
 	val, _, _, _, err := s.store.GetKVEntry(constants.PeersKey)
 	if err != nil {
-		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
-		return
+		return nil, fmt.Errorf("failed to get peers from KV store: %w", err)
 	}
 	members := make(map[string]state.PeerInfo)
 	if val != nil {
@@ -383,37 +371,33 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 			glog.Errorf("Failed to unmarshal peers map: %v", err)
 		}
 	}
+	return members, nil
+}
 
-	kvs, err := s.store.GetAllKVs()
+func (s *HTTPServer) prepareBaseData(title, activeNav string) (BaseData, error) {
+	shortName, err := s.store.GetShortName()
 	if err != nil {
-		http.Error(w, "Failed to get KV store", http.StatusInternalServerError)
-		return
+		return BaseData{}, err
 	}
+	return BaseData{
+		Title:     title,
+		AgentName: shortName,
+		ActiveNav: activeNav,
+	}, nil
+}
 
-	data := IndexData{
-		BaseData: BaseData{
-			Title:     "Status",
-			AgentName: shortName,
-			ActiveNav: "status",
-		},
-		AgentID:   template.HTML(fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(agentID, 40)))),
-		KeysCount: len(kvs),
-	}
-
-	if ident, err := s.store.GetIdentity(""); err == nil {
-		data.AgentCert = string(identity.MarshalCertificate(ident.Certificate))
-	}
-
+func (s *HTTPServer) prepareParticipants(members map[string]state.PeerInfo, selfID string) []Participant {
 	var ids []string
 	for id := range members {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 
+	var participants []Participant
 	for _, id := range ids {
 		idWrapped := fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(id, 40)))
 		label := idWrapped
-		if id == agentID {
+		if id == selfID {
 			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", idWrapped)
 		}
 		info := members[id]
@@ -428,12 +412,50 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
-		data.Participants = append(data.Participants, Participant{
+		participants = append(participants, Participant{
 			IDLabel:   template.HTML(label),
 			ShortName: info.ShortName,
 			GRPCAddr:  grpcAddr,
 			HTTPLink:  template.HTML(httpLink),
 		})
+	}
+	return participants
+}
+
+func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
+	agentID, err := s.store.GetAgentID()
+	if err != nil {
+		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
+		return
+	}
+
+	base, err := s.prepareBaseData("Status", "status")
+	if err != nil {
+		http.Error(w, "Failed to prepare base data", http.StatusInternalServerError)
+		return
+	}
+
+	members, err := s.getConsensusMembers()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	kvs, err := s.store.GetAllKVs()
+	if err != nil {
+		http.Error(w, "Failed to get KV store", http.StatusInternalServerError)
+		return
+	}
+
+	data := IndexData{
+		BaseData:     base,
+		AgentID:      template.HTML(fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(agentID, 40)))),
+		KeysCount:    len(kvs),
+		Participants: s.prepareParticipants(members, agentID),
+	}
+
+	if ident, err := s.store.GetIdentity(""); err == nil {
+		data.AgentCert = string(identity.MarshalCertificate(ident.Certificate))
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -449,35 +471,27 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
 	}
-	shortName, err := s.store.GetShortName()
+
+	base, err := s.prepareBaseData("Messages", "messages")
 	if err != nil {
-		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
+		http.Error(w, "Failed to prepare base data", http.StatusInternalServerError)
 		return
 	}
+
 	entries, err := s.store.GetRecentMessages(100)
 	if err != nil {
 		http.Error(w, "Failed to get recent messages", http.StatusInternalServerError)
 		return
 	}
 
-	val, _, _, _, err := s.store.GetKVEntry(constants.PeersKey)
+	members, err := s.getConsensusMembers()
 	if err != nil {
-		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-	members := make(map[string]state.PeerInfo)
-	if val != nil {
-		if err := json.Unmarshal(val, &members); err != nil {
-			glog.Errorf("Failed to unmarshal peers map: %v", err)
-		}
 	}
 
 	data := MessagesData{
-		BaseData: BaseData{
-			Title:     "Messages",
-			AgentName: shortName,
-			ActiveNav: "messages",
-		},
+		BaseData: base,
 	}
 
 	var ids []string
@@ -543,31 +557,21 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to get Agent ID", http.StatusInternalServerError)
 		return
 	}
-	shortName, err := s.store.GetShortName()
+
+	base, err := s.prepareBaseData("Peers", "peers")
 	if err != nil {
-		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
+		http.Error(w, "Failed to prepare base data", http.StatusInternalServerError)
 		return
 	}
 
-	val, _, _, _, err := s.store.GetKVEntry(constants.PeersKey)
+	members, err := s.getConsensusMembers()
 	if err != nil {
-		http.Error(w, "Failed to get peers from KV store", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-
-	members := make(map[string]state.PeerInfo)
-	if val != nil {
-		if err := json.Unmarshal(val, &members); err != nil {
-			glog.Errorf("Failed to unmarshal peers map: %v", err)
-		}
 	}
 
 	data := PeersData{
-		BaseData: BaseData{
-			Title:     "Peers",
-			AgentName: shortName,
-			ActiveNav: "peers",
-		},
+		BaseData: base,
 	}
 
 	var ids []string
@@ -618,11 +622,12 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
-	shortName, err := s.store.GetShortName()
+	base, err := s.prepareBaseData("KV Store", "store")
 	if err != nil {
-		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
+		http.Error(w, "Failed to prepare base data", http.StatusInternalServerError)
 		return
 	}
+
 	kvs, err := s.store.GetAllKVs()
 	if err != nil {
 		http.Error(w, "Failed to get KV store", http.StatusInternalServerError)
@@ -630,11 +635,7 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := StoreData{
-		BaseData: BaseData{
-			Title:     "KV Store",
-			AgentName: shortName,
-			ActiveNav: "store",
-		},
+		BaseData: base,
 	}
 
 	for _, kv := range kvs {
@@ -683,16 +684,16 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortName, _ := s.store.GetShortName()
+	base, err := s.prepareBaseData("Proposal Success", "")
+	if err != nil {
+		http.Error(w, "Failed to prepare base data", http.StatusInternalServerError)
+		return
+	}
 
 	data := CommandData{
-		BaseData: BaseData{
-			Title:     "Proposal Success",
-			AgentName: shortName,
-			ActiveNav: "",
-		},
-		Key:   key,
-		Value: val,
+		BaseData: base,
+		Key:      key,
+		Value:    val,
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -703,9 +704,9 @@ func (s *HTTPServer) handleCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
-	shortName, err := s.store.GetShortName()
+	base, err := s.prepareBaseData("User API", "userapi")
 	if err != nil {
-		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
+		http.Error(w, "Failed to prepare base data", http.StatusInternalServerError)
 		return
 	}
 
@@ -715,11 +716,7 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	data := UserAPIData{
-		BaseData: BaseData{
-			Title:     "User API",
-			AgentName: shortName,
-			ActiveNav: "userapi",
-		},
+		BaseData: base,
 	}
 
 	ongoingHTML := ""
@@ -1263,9 +1260,9 @@ func prototextToTable(text string) string {
 }
 
 func (s *HTTPServer) handleSystem(w http.ResponseWriter, r *http.Request) {
-	shortName, err := s.store.GetShortName()
+	base, err := s.prepareBaseData("System Introspection", "system")
 	if err != nil {
-		http.Error(w, "Failed to get Short Name", http.StatusInternalServerError)
+		http.Error(w, "Failed to prepare base data", http.StatusInternalServerError)
 		return
 	}
 
@@ -1276,11 +1273,7 @@ func (s *HTTPServer) handleSystem(w http.ResponseWriter, r *http.Request) {
 	numCPU := runtime.NumCPU()
 
 	data := SystemData{
-		BaseData: BaseData{
-			Title:     "System Introspection",
-			AgentName: shortName,
-			ActiveNav: "system",
-		},
+		BaseData:      base,
 		NumCPU:        numCPU,
 		NumGoroutines: numGoroutines,
 		Alloc:         m.Alloc,
