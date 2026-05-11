@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/filmil/synod/internal/constants"
+	"github.com/filmil/synod/internal/identity"
 	"io"
 	"net/http"
 	"os"
@@ -85,7 +86,7 @@ func TestIntegration_5Agents(t *testing.T) {
 		}
 
 		// Join agent-0
-		client, err := server.NewPaxosClient("temp-joiner", addr0)
+		client, err := server.NewPaxosClient("temp-joiner", addr0, agents[i].ident)
 		if err != nil {
 			t.Fatalf("failed to create join client: %v", err)
 		}
@@ -218,6 +219,7 @@ type agentInstance struct {
 	httpURL    string
 	dir        string
 	store      *state.Store
+	ident      *identity.Identity
 	cell       *paxos.Cell
 	srv        *server.PaxosServer
 	cancelFunc context.CancelFunc
@@ -236,7 +238,7 @@ func newAgentInstance(t *testing.T, id, dir, addr string) *agentInstance {
 	ident, _ := store.GetIdentity("")
 
 	peerFactory := func(id, addr string) (paxos.PeerClient, error) {
-		return server.NewPaxosClient(id, addr)
+		return server.NewPaxosClient(id, addr, ident)
 	}
 
 	acceptor := paxos.NewAcceptor(actualID, ident, store)
@@ -252,6 +254,7 @@ func newAgentInstance(t *testing.T, id, dir, addr string) *agentInstance {
 		id:    actualID,
 		dir:   dir,
 		store: store,
+		ident: ident,
 		cell:  cell,
 		srv:   srv,
 	}
@@ -283,7 +286,7 @@ func (a *agentInstance) run() {
 	a.cell.StartEndpointSyncLoop(ctx, 2*time.Second)
 
 	go func() {
-		server.RunGRPCServer(ctx, grpcLis, a.srv)
+		server.RunGRPCServer(ctx, grpcLis, a.srv, a.ident)
 	}()
 
 	go func() {

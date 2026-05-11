@@ -97,7 +97,7 @@ func main() {
 	}
 
 	peerFactory := func(id, addr string) (paxos.PeerClient, error) {
-		return server.NewPaxosClient(id, addr)
+		return server.NewPaxosClient(id, addr, ident)
 	}
 
 	acceptor := paxos.NewAcceptor(agentID, ident, store)
@@ -115,7 +115,7 @@ func main() {
 
 	if *peerAddr != "" {
 		glog.Infof("Attempting to fetch peer info from: %s", *peerAddr)
-		joinClient, err = server.NewPaxosClient("temp-peer", *peerAddr)
+		joinClient, err = server.NewPaxosClient("temp-peer", *peerAddr, ident)
 		if err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			req := &paxosv1.GetKVEntryRequest{Key: constants.PeersKey}
@@ -309,7 +309,7 @@ func main() {
 	defer cancel()
 
 	go func() {
-		err := server.RunGRPCServer(ctx, grpcLis, paxosSrv)
+		err := server.RunGRPCServer(ctx, grpcLis, paxosSrv, ident)
 		if err != nil {
 			errChan <- err
 		}

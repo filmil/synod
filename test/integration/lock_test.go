@@ -47,7 +47,7 @@ func TestIntegration_Locks(t *testing.T) {
 		infoI := state.PeerInfo{ShortName: fmt.Sprintf("agent-%d", i), GRPCAddr: agents[i].grpcAddr, HTTPURL: agents[i].httpURL}
 		agents[i].store.AddMember(agents[i].id, infoI)
 
-		client, _ := server.NewPaxosClient("temp-joiner", addr0)
+		client, _ := server.NewPaxosClient("temp-joiner", addr0, agents[i].ident)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		client.JoinCluster(ctx, &paxosv1.JoinClusterRequest{
 			AgentId:   agents[i].id,

@@ -12,6 +12,7 @@ go_test(
     deps = [
         "//internal/backoff",
         "//internal/constants",
+        "//internal/identity",
         "//internal/paxos",
         "//internal/server",
         "//internal/state",

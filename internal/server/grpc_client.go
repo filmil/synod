@@ -6,9 +6,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/filmil/synod/internal/identity"
 	paxosv1 "github.com/filmil/synod/proto/paxos/v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 )
 
 // PaxosClient wraps a gRPC connection to a remote Paxos agent.
@@ -22,8 +23,12 @@ type PaxosClient struct {
 }
 
 // NewPaxosClient establishes a connection to the specified address.
-func NewPaxosClient(agentID string, addr string) (*PaxosClient, error) {
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func NewPaxosClient(agentID string, addr string, ident *identity.Identity) (*PaxosClient, error) {
+	tlsConfig, err := ident.ClientTLSConfig(agentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client TLS config: %w", err)
+	}
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial: %w", err)
 	}

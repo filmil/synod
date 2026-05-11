@@ -8,6 +8,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -15,6 +16,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -73,13 +75,93 @@ func Generate(shortName string) (*Identity, error) {
 
 // AgentID derives a unique agent ID from the certificate's public key.
 func (i *Identity) AgentID() string {
-	pubBytes, err := x509.MarshalPKIXPublicKey(i.Certificate.PublicKey)
+	return AgentIDFromCertificate(i.Certificate)
+}
+
+// AgentIDFromCertificate derives a unique agent ID from the certificate's public key.
+func AgentIDFromCertificate(cert *x509.Certificate) string {
+	if cert == nil {
+		return ""
+	}
+	pubBytes, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
 	if err != nil {
-		// This should not happen with a valid certificate
 		return ""
 	}
 	hash := sha256.Sum256(pubBytes)
 	return hex.EncodeToString(hash[:])
+}
+
+// ServerTLSConfig returns a TLS configuration for a gRPC server.
+func (i *Identity) ServerTLSConfig() (*tls.Config, error) {
+	if i == nil {
+		return nil, fmt.Errorf("identity is nil")
+	}
+	cert := tls.Certificate{
+		Certificate: [][]byte{i.Certificate.Raw},
+		PrivateKey:  i.PrivateKey,
+		Leaf:        i.Certificate,
+	}
+
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAnyClientCert,
+		// We use VerifyPeerCertificate for custom validation of self-signed certs.
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			_, err := verifySelfSigned(rawCerts)
+			return err
+		},
+	}, nil
+}
+
+// ClientTLSConfig returns a TLS configuration for a gRPC client.
+func (i *Identity) ClientTLSConfig(expectedRemoteID string) (*tls.Config, error) {
+	if i == nil {
+		return nil, fmt.Errorf("identity is nil")
+	}
+	cert := tls.Certificate{
+		Certificate: [][]byte{i.Certificate.Raw},
+		PrivateKey:  i.PrivateKey,
+		Leaf:        i.Certificate,
+	}
+
+	return &tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			cert, err := verifySelfSigned(rawCerts)
+			if err != nil {
+				return err
+			}
+			if expectedRemoteID != "" && !strings.HasPrefix(expectedRemoteID, "temp-") {
+				remoteID := AgentIDFromCertificate(cert)
+				if remoteID != expectedRemoteID {
+					return fmt.Errorf("remote agent ID mismatch: expected %s, got %s", expectedRemoteID, remoteID)
+				}
+			}
+			return nil
+		},
+	}, nil
+}
+
+func verifySelfSigned(rawCerts [][]byte) (*x509.Certificate, error) {
+	if len(rawCerts) == 0 {
+		return nil, fmt.Errorf("no certificates provided")
+	}
+	cert, err := x509.ParseCertificate(rawCerts[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate: %w", err)
+	}
+	// Check expiry
+	now := time.Now()
+	if now.Before(cert.NotBefore) || now.After(cert.NotAfter) {
+		return nil, fmt.Errorf("certificate is expired or not yet valid")
+	}
+	// Check self-signature
+	if err := cert.CheckSignatureFrom(cert); err != nil {
+		return nil, fmt.Errorf("certificate is not self-signed: %w", err)
+	}
+	return cert, nil
 }
 
 // Sign creates a signature for the given data using the private key.

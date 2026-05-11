@@ -15,6 +15,7 @@ import (
 	"github.com/golang/glog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/channelz/service"
+	"google.golang.org/grpc/credentials"
 )
 
 // PaxosServer implements both the internal PaxosService and the client-facing UserService over gRPC.
@@ -338,8 +339,15 @@ func timeoutInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySe
 }
 
 // RunGRPCServer starts the gRPC server and registers the Paxos and User APIs.
-func RunGRPCServer(ctx context.Context, lis net.Listener, srv *PaxosServer) error {
-	s := grpc.NewServer(grpc.UnaryInterceptor(timeoutInterceptor))
+func RunGRPCServer(ctx context.Context, lis net.Listener, srv *PaxosServer, ident *identity.Identity) error {
+	tlsConfig, err := ident.ServerTLSConfig()
+	if err != nil {
+		return fmt.Errorf("failed to create server TLS config: %w", err)
+	}
+	s := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+		grpc.UnaryInterceptor(timeoutInterceptor),
+	)
 
 	paxosv1.RegisterPaxosServiceServer(s, srv)
 	paxosv1.RegisterUserServiceServer(s, srv)
