@@ -11,7 +11,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/channelz/grpc_channelz_v1"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	"html"
 )
 
@@ -49,7 +49,14 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	conn, err := grpc.NewClient(selfInfo.GRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	tlsConfig, err := s.ident.ClientTLSConfig(agentID)
+	if err != nil {
+		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-danger'>Failed to create client TLS config: %v</div>", html.EscapeString(err.Error())))
+		s.renderGRPCStatus(w, data)
+		return
+	}
+
+	conn, err := grpc.NewClient(selfInfo.GRPCAddr, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	if err != nil {
 		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-danger'>Failed to connect to local gRPC channelz: %v</div>", html.EscapeString(err.Error())))
 		s.renderGRPCStatus(w, data)

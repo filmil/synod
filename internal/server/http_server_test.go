@@ -39,7 +39,7 @@ func setupTestServer(t *testing.T) (*HTTPServer, func()) {
 	}
 	cell := paxos.NewCell(agentID, store, ident, acceptor, factory, ":50101", "http://localhost:8081")
 
-	server := NewHTTPServer(":8081", store, cell)
+	server := NewHTTPServer(":8081", store, ident, cell)
 
 	cleanup := func() {
 		store.Close()

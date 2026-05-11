@@ -316,7 +316,7 @@ func main() {
 	}()
 
 	go func() {
-		httpSrv := server.NewHTTPServer(*httpAddr, store, cell)
+		httpSrv := server.NewHTTPServer(*httpAddr, store, ident, cell)
 		err := httpSrv.Run(httpLis)
 		if err != nil {
 			errChan <- err

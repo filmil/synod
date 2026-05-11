@@ -258,6 +258,7 @@ const (
 // HTTPServer provides a web dashboard for inspecting agent state and issuing commands.
 type HTTPServer struct {
 	store *state.Store
+	ident *identity.Identity
 	cell  *paxos.Cell
 	addr  string
 
@@ -266,10 +267,11 @@ type HTTPServer struct {
 }
 
 // NewHTTPServer initializes a new HTTPServer.
-func NewHTTPServer(addr string, store *state.Store, cell *paxos.Cell) *HTTPServer {
+func NewHTTPServer(addr string, store *state.Store, ident *identity.Identity, cell *paxos.Cell) *HTTPServer {
 	return &HTTPServer{
 		addr:            addr,
 		store:           store,
+		ident:           ident,
 		cell:            cell,
 		ongoingRequests: []OngoingRequest{},
 	}
