@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/filmil/synod/internal/identity"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/channelz/grpc_channelz_v1"
 	"google.golang.org/grpc/credentials"
