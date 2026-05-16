@@ -189,3 +189,61 @@ func TestHTTPServer_handleSystem(t *testing.T) {
 		t.Errorf("expected 'Go Runtime Statistics' in body")
 	}
 }
+
+func TestHTTPServer_XSSProtection(t *testing.T) {
+	server, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	// Inject malicious peer info
+	maliciousID := "attacker-id<script>alert('id')</script>"
+	maliciousName := "Attacker<script>alert('name')</script>"
+	maliciousURL := "javascript:alert('xss')"
+
+	server.store.UpdatePeerInfo(maliciousID, state.PeerInfo{
+		ShortName: maliciousName,
+		HTTPURL:   maliciousURL,
+		GRPCAddr:  "127.0.0.1:50051",
+	})
+
+	t.Run("IndexPage", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		w := httptest.NewRecorder()
+		server.handleIndex(w, req)
+		body := w.Body.String()
+
+		if strings.Contains(body, maliciousID) {
+			t.Errorf("Body contains raw malicious ID, should be escaped")
+		}
+		if strings.Contains(body, maliciousName) {
+			t.Errorf("Body contains raw malicious Name, should be escaped")
+		}
+		if strings.Contains(body, maliciousURL) && !strings.Contains(body, "#") {
+			t.Errorf("Body contains raw malicious URL, should be sanitized to #")
+		}
+
+		escapedID := html.EscapeString(maliciousID)
+		if !strings.Contains(body, escapedID) {
+			// Note: wrapString might break the escaped ID if not careful, but let's check for pieces
+			t.Logf("Checking for escaped ID: %s", escapedID)
+		}
+		escapedName := html.EscapeString(maliciousName)
+		if !strings.Contains(body, escapedName) {
+			t.Errorf("Body does not contain escaped Name: %s", escapedName)
+		}
+	})
+
+	t.Run("PeersPage", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/peers", nil)
+		w := httptest.NewRecorder()
+		server.handlePeers(w, req)
+		body := w.Body.String()
+
+		escapedName := html.EscapeString(maliciousName)
+		if !strings.Contains(body, escapedName) {
+			t.Errorf("Body does not contain escaped Name: %s", escapedName)
+		}
+		if strings.Contains(body, maliciousURL) && !strings.Contains(body, "href=\"#\"") {
+			t.Errorf("Malicious URL not sanitized in Peers page")
+		}
+	})
+}

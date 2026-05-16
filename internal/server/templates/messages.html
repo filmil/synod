@@ -58,9 +58,17 @@
               <tbody>
                 {{range .Peers}}
                 <tr>
-                  <td>{{.Label}}</td>
+                  <td>
+                    {{.Name}}
+                    {{if .IsSelf}}<span class="badge bg-secondary">self</span>{{end}}
+                  </td>
                   <td><small class="text-muted">{{.AgentID}}</small></td>
-                  <td>{{.Endpoints}}</td>
+                  <td>
+                    <code>{{.GRPCAddr}}</code>
+                    {{if .HTTPURL}}
+                      | <a href="{{sanitizeURL .HTTPURL}}" target="_blank">{{.HTTPURL}}</a>
+                    {{end}}
+                  </td>
                 </tr>
                 {{end}}
               </tbody>

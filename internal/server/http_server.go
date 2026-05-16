@@ -51,7 +51,10 @@ type OngoingRequest struct {
 //go:embed templates/*.html
 var templateFS embed.FS
 
-var templates = template.Must(template.ParseFS(templateFS, "templates/*.html"))
+var templates = template.Must(template.New("").Funcs(template.FuncMap{
+	"sanitizeURL": sanitizeURL,
+	"wrapString":  wrapString,
+}).ParseFS(templateFS, "templates/*.html"))
 
 // HTTPServer provides a web dashboard for inspecting agent state and issuing commands.
 type BaseData struct {
@@ -61,24 +64,27 @@ type BaseData struct {
 }
 
 type Participant struct {
-	IDLabel   template.HTML
+	ID        string
+	IsSelf    bool
 	ShortName string
 	GRPCAddr  string
-	HTTPLink  template.HTML
+	HTTPURL   string
 }
 
 type IndexData struct {
 	BaseData
-	AgentID      template.HTML
+	AgentID      string
 	AgentCert    string
 	KeysCount    int
 	Participants []Participant
 }
 
 type Peer struct {
-	Label     template.HTML
+	Name      string
+	IsSelf    bool
 	AgentID   string
-	Endpoints template.HTML
+	GRPCAddr  string
+	HTTPURL   string
 }
 
 type Message struct {
@@ -98,12 +104,12 @@ type MessagesData struct {
 }
 
 type KnownPeer struct {
-	ID       string
-	Name     string
-	GRPCURL  string
-	HTTPLink template.HTML
-	HasCert  bool
-	CertPEM  string
+	ID      string
+	Name    string
+	GRPCURL string
+	HTTPURL string
+	HasCert bool
+	CertPEM string
 }
 
 type PeersData struct {
@@ -112,7 +118,7 @@ type PeersData struct {
 }
 
 type KV struct {
-	Key     template.HTML
+	Key     string
 	Value   template.HTML
 	Type    string
 	Version uint64
@@ -169,7 +175,7 @@ type GRPCChannelData struct {
 
 type GRPCStatusData struct {
 	BaseData
-	ErrorMsg template.HTML
+	ErrorMsg string
 	Servers  []GRPCServerData
 	Channels []GRPCChannelData
 }
@@ -230,7 +236,15 @@ const (
             <td>{{.Time}}</td>
             <td>{{.Type}}</td>
             <td><code>{{.Key}}</code></td>
-            <td>{{.StatusHTML}}</td>
+            <td>
+              {{if not .Finished}}
+                <span class="badge bg-secondary">Ongoing...</span>
+              {{else if .Success}}
+                <span class="badge bg-success">Success</span>
+              {{else}}
+                <span class="badge bg-danger">Failed</span>
+              {{end}}
+            </td>
             <td><small>{{.Result}}</small></td>
           </tr>
           {{end}}
@@ -395,28 +409,18 @@ func (s *HTTPServer) prepareParticipants(members map[string]state.PeerInfo, self
 
 	var participants []Participant
 	for _, id := range ids {
-		idWrapped := fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(id, 40)))
-		label := idWrapped
-		if id == selfID {
-			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", idWrapped)
-		}
 		info := members[id]
 
-		httpLink := ""
-		if info.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", html.EscapeString(sanitizeURL(info.HTTPURL)), html.EscapeString(info.HTTPURL))
-		} else {
-			httpLink = "<span class=\"text-muted\">N/A</span>"
-		}
 		grpcAddr := info.GRPCAddr
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
 		participants = append(participants, Participant{
-			IDLabel:   template.HTML(label),
+			ID:        id,
+			IsSelf:    id == selfID,
 			ShortName: info.ShortName,
 			GRPCAddr:  grpcAddr,
-			HTTPLink:  template.HTML(httpLink),
+			HTTPURL:   info.HTTPURL,
 		})
 	}
 	return participants
@@ -449,7 +453,7 @@ func (s *HTTPServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	data := IndexData{
 		BaseData:     base,
-		AgentID:      template.HTML(fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(agentID, 40)))),
+		AgentID:      agentID,
 		KeysCount:    len(kvs),
 		Participants: s.prepareParticipants(members, agentID),
 	}
@@ -502,24 +506,17 @@ func (s *HTTPServer) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	for _, id := range ids {
 		info := members[id]
-		label := html.EscapeString(info.ShortName)
-		if id == agentID {
-			label = fmt.Sprintf("%s <span class=\"badge bg-secondary\">self</span>", label)
-		}
-
 		grpcAddr := info.GRPCAddr
 		if grpcAddr == "" {
 			grpcAddr = "unknown"
 		}
-		endpoints := fmt.Sprintf("<code>%s</code>", html.EscapeString(grpcAddr))
-		if info.HTTPURL != "" {
-			endpoints += fmt.Sprintf(" | <a href=\"%s\" target=\"_blank\">%s</a>", html.EscapeString(sanitizeURL(info.HTTPURL)), html.EscapeString(info.HTTPURL))
-		}
 
 		data.Peers = append(data.Peers, Peer{
-			Label:     template.HTML(label),
-			AgentID:   id,
-			Endpoints: template.HTML(endpoints),
+			Name:     info.ShortName,
+			IsSelf:   id == agentID,
+			AgentID:  id,
+			GRPCAddr: grpcAddr,
+			HTTPURL:  info.HTTPURL,
 		})
 	}
 
@@ -591,12 +588,6 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		}
 		grpcURL := fmt.Sprintf("grpc://%s", grpcAddr)
 
-		httpLink := ""
-		if info.HTTPURL != "" {
-			httpLink = fmt.Sprintf("<a href=\"%s\" class=\"text-decoration-none\" target=\"_blank\">%s</a>", html.EscapeString(sanitizeURL(info.HTTPURL)), html.EscapeString(info.HTTPURL))
-		} else {
-			httpLink = "<span class=\"text-muted\">N/A</span>"
-		}
 		certPEM := ""
 		if len(info.Certificate) > 0 {
 			if cert, err := identity.UnmarshalCertificate(info.Certificate); err == nil {
@@ -605,12 +596,12 @@ func (s *HTTPServer) handlePeers(w http.ResponseWriter, r *http.Request) {
 		}
 
 		data.Peers = append(data.Peers, KnownPeer{
-			ID:       id,
-			Name:     info.ShortName,
-			GRPCURL:  grpcURL,
-			HTTPLink: template.HTML(httpLink),
-			HasCert:  len(info.Certificate) > 0,
-			CertPEM:  certPEM,
+			ID:      id,
+			Name:    info.ShortName,
+			GRPCURL: grpcURL,
+			HTTPURL: info.HTTPURL,
+			HasCert: len(info.Certificate) > 0,
+			CertPEM: certPEM,
 		})
 	}
 
@@ -640,7 +631,7 @@ func (s *HTTPServer) handleStore(w http.ResponseWriter, r *http.Request) {
 
 	for _, kv := range kvs {
 		data.KVs = append(data.KVs, KV{
-			Key:     template.HTML(fmt.Sprintf(`<div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">%s</div>`, html.EscapeString(wrapString(kv.Key, 40)))),
+			Key:     kv.Key,
 			Value:   template.HTML(maybeJSONToTable(kv.Value)),
 			Type:    kv.Type,
 			Version: kv.Version,
@@ -722,32 +713,26 @@ func (s *HTTPServer) handleUserAPI(w http.ResponseWriter, r *http.Request) {
 	ongoingHTML := ""
 	if len(ongoing) > 0 {
 		type renderEntry struct {
-			Time       string
-			Type       string
-			Key        string
-			StatusHTML template.HTML
-			Result     string
+			Time     string
+			Type     string
+			Key      string
+			Finished bool
+			Success  bool
+			Result   string
 		}
 		var entries []renderEntry
 		for _, r := range ongoing {
-			status := "<span class=\"badge bg-secondary\">Ongoing...</span>"
-			if r.Finished {
-				if r.Success {
-					status = "<span class=\"badge bg-success\">Success</span>"
-				} else {
-					status = "<span class=\"badge bg-danger\">Failed</span>"
-				}
-			}
 			resultText := r.Result
 			if len(resultText) > 100 {
 				resultText = resultText[:97] + "..."
 			}
 			entries = append(entries, renderEntry{
-				Time:       r.StartTime.Format("15:04:05"),
-				Type:       r.Type,
-				Key:        r.Key,
-				StatusHTML: template.HTML(status),
-				Result:     resultText,
+				Time:     r.StartTime.Format("15:04:05"),
+				Type:     r.Type,
+				Key:      r.Key,
+				Finished: r.Finished,
+				Success:  r.Success,
+				Result:   resultText,
 			})
 		}
 		var sb strings.Builder

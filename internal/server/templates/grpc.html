@@ -46,7 +46,7 @@
     </nav>
     <div class="container">
       {{if .ErrorMsg}}
-        {{.ErrorMsg}}
+        <div class="alert alert-danger">{{.ErrorMsg}}</div>
       {{end}}
 
       <div class="card shadow-sm mb-4">

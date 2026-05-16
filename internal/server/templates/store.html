@@ -61,7 +61,7 @@
               <tbody>
                 {{range $index, $kv := .KVs}}
                 <tr>
-                  <td>{{$kv.Key}}</td>
+                  <td><div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">{{wrapString $kv.Key 40}}</div></td>
                   <td>
                     <button class="btn btn-sm btn-outline-info py-0 mb-1" type="button" data-bs-toggle="collapse" data-bs-target="#val-{{$index}}" aria-expanded="false">
                       View Value

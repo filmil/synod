@@ -65,7 +65,13 @@
                   <td><code>{{.ID}}</code></td>
                   <td>{{.Name}}</td>
                   <td><a href="{{.GRPCURL}}" class="text-decoration-none">{{.GRPCURL}}</a></td>
-                  <td>{{.HTTPLink}}</td>
+                  <td>
+                    {{if .HTTPURL}}
+                      <a href="{{sanitizeURL .HTTPURL}}" class="text-decoration-none" target="_blank">{{.HTTPURL}}</a>
+                    {{else}}
+                      <span class="text-muted">N/A</span>
+                    {{end}}
+                  </td>
                   <td>
                     {{if .HasCert}}
                     <span class="badge bg-success mb-1">Certificate</span>

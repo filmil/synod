@@ -34,14 +34,14 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 
 	members, err := s.store.GetMembers()
 	if err != nil {
-		data.ErrorMsg = template.HTML("<div class='alert alert-danger'>Failed to retrieve members</div>")
+		data.ErrorMsg = "Failed to retrieve members"
 		s.renderGRPCStatus(w, data)
 		return
 	}
 
 	selfInfo, ok := members[agentID]
 	if !ok || selfInfo.GRPCAddr == "" {
-		data.ErrorMsg = template.HTML("<div class='alert alert-danger'>gRPC address not found for self</div>")
+		data.ErrorMsg = "gRPC address not found for self"
 		s.renderGRPCStatus(w, data)
 		return
 	}
@@ -51,7 +51,7 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := grpc.NewClient(selfInfo.GRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-danger'>Failed to connect to local gRPC channelz: %v</div>", html.EscapeString(err.Error())))
+		data.ErrorMsg = fmt.Sprintf("Failed to connect to local gRPC channelz: %v", err)
 		s.renderGRPCStatus(w, data)
 		return
 	}
@@ -62,18 +62,18 @@ func (s *HTTPServer) handleGRPC(w http.ResponseWriter, r *http.Request) {
 	// Get Servers
 	servers, err := s.fetchGRPCServers(ctx, client)
 	if err != nil {
-		data.ErrorMsg = template.HTML(fmt.Sprintf("<div class='alert alert-warning'>Failed to get servers: %v</div>", html.EscapeString(err.Error())))
+		data.ErrorMsg = fmt.Sprintf("Failed to get servers: %v", err)
 	}
 	data.Servers = servers
 
 	// Get Top Channels
 	channels, err := s.fetchGRPCChannels(ctx, client)
 	if err != nil {
-		errMsg := fmt.Sprintf("<div class='alert alert-warning'>Failed to get top channels: %v</div>", html.EscapeString(err.Error()))
+		errMsg := fmt.Sprintf("Failed to get top channels: %v", err)
 		if data.ErrorMsg != "" {
-			data.ErrorMsg = template.HTML(string(data.ErrorMsg) + errMsg)
+			data.ErrorMsg = data.ErrorMsg + "; " + errMsg
 		} else {
-			data.ErrorMsg = template.HTML(errMsg)
+			data.ErrorMsg = errMsg
 		}
 	}
 	data.Channels = channels

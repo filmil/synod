@@ -50,7 +50,7 @@
           <div class="card shadow-sm mb-4">
             <div class="card-header bg-primary text-white">Agent Info</div>
             <div class="card-body">
-              <p class="card-text"><strong>ID:</strong> <small class="text-muted">{{.AgentID}}</small></p>
+              <p class="card-text"><strong>ID:</strong> <small class="text-muted"><div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">{{wrapString .AgentID 40}}</div></small></p>
               <p class="card-text"><strong>Name:</strong> {{.AgentName}}</p>
               <p class="card-text"><strong>Keys Count:</strong> {{.KeysCount}}</p>
               <hr>
@@ -75,10 +75,21 @@
                   <tbody>
                     {{range .Participants}}
                     <tr>
-                      <td><small>{{.IDLabel}}</small></td>
+                      <td>
+                        <small>
+                           <div style="white-space: pre-wrap; font-family: monospace; word-break: break-all;">{{wrapString .ID 40}}</div>
+                           {{if .IsSelf}}<span class="badge bg-secondary">self</span>{{end}}
+                        </small>
+                      </td>
                       <td>{{.ShortName}}</td>
                       <td><code>{{.GRPCAddr}}</code></td>
-                      <td>{{.HTTPLink}}</td>
+                      <td>
+                        {{if .HTTPURL}}
+                          <a href="{{sanitizeURL .HTTPURL}}" class="text-decoration-none" target="_blank">{{.HTTPURL}}</a>
+                        {{else}}
+                          <span class="text-muted">N/A</span>
+                        {{end}}
+                      </td>
                     </tr>
                     {{end}}
                   </tbody>
