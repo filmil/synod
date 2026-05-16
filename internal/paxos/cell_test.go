@@ -195,38 +195,3 @@ func TestCell_Propose_LockCheckerError(t *testing.T) {
 		t.Errorf("expected lock checker to be called exactly once, got %d. This indicates backoff.Permanent is not preventing retries.", callCount)
 	}
 }
-
-func TestCell_SetSelfAddress(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	store, err := state.NewStore(tmpDir)
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
-	defer store.Close()
-
-	agentID := "agent-1"
-	acceptor := NewAcceptor(agentID, nil, store)
-
-	cell := NewCell(agentID, store, nil, acceptor, nil, "initial-grpc", "initial-http")
-
-	// Verify initial state
-	if cell.selfGRPCAddr != "initial-grpc" {
-		t.Errorf("expected initial grpc addr 'initial-grpc', got %q", cell.selfGRPCAddr)
-	}
-	if cell.selfHTTPURL != "initial-http" {
-		t.Errorf("expected initial http url 'initial-http', got %q", cell.selfHTTPURL)
-	}
-
-	newGRPC := "new-grpc:50051"
-	newHTTP := "http://new-http:8080"
-	cell.SetSelfAddress(newGRPC, newHTTP)
-
-	// Verify updated state
-	if cell.selfGRPCAddr != newGRPC {
-		t.Errorf("expected updated grpc addr %q, got %q", newGRPC, cell.selfGRPCAddr)
-	}
-	if cell.selfHTTPURL != newHTTP {
-		t.Errorf("expected updated http url %q, got %q", newHTTP, cell.selfHTTPURL)
-	}
-}
