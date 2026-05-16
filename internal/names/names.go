@@ -4,14 +4,9 @@ package names
 
 import (
 	"math/rand"
-	"time"
 )
 
 var loadedNames []string
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 // GenerateForIndex returns a random name from the pre-loaded list.
 // It prefers names starting with 'A' for index 0, 'B' for index 1, etc.
