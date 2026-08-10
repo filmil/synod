@@ -25,11 +25,21 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: minor
+          # Was `minor`. With any value other than `false` the action bumps the
+          # version on every run, even when no commit landed since the last
+          # tag, and the guards below never fire. v1.10.0 and v1.11.0 hold the
+          # same tree for that reason.
+          #
+          # This does change more than the other repositories in this sweep: a
+          # commit whose title is not a conventional commit used to produce a
+          # minor release here, and now produces none. Use `feat:` for a minor
+          # release and `fix:` for a patch release.
+          default_bump: false
           release_branches: main
 
   build:
     needs: tag
+    if: ${{ needs.tag.outputs.new_tag != '' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -78,6 +88,7 @@ jobs:
 
   release:
     needs: [tag, build]
+    if: ${{ needs.tag.outputs.new_tag != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
