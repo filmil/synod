@@ -167,9 +167,14 @@ type GRPCChannelData struct {
 	CallsFailed    int64
 }
 
+type GRPCAlert struct {
+	Type    string
+	Message string
+}
+
 type GRPCStatusData struct {
 	BaseData
-	ErrorMsg template.HTML
+	Alerts   []GRPCAlert
 	Servers  []GRPCServerData
 	Channels []GRPCChannelData
 }

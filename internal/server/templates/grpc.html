@@ -45,8 +45,10 @@
       </div>
     </nav>
     <div class="container">
-      {{if .ErrorMsg}}
-        {{.ErrorMsg}}
+      {{if .Alerts}}
+        {{range .Alerts}}
+          <div class='alert alert-{{.Type}}'>{{.Message}}</div>
+        {{end}}
       {{end}}
 
       <div class="card shadow-sm mb-4">
