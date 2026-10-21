@@ -1,6 +1,6 @@
 module github.com/filmil/synod
 
-go 1.24.3
+go 1.26.10
 
 require (
 	github.com/bazelbuild/rules_go v0.60.0
